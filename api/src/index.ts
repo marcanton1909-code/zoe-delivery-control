@@ -235,7 +235,7 @@ async function setupAdmin(request: Request, env: Env): Promise<Response> {
     .bind(sessionId, id, tokenHash, expiresAt)
     .run();
 
-  const response = json({ ok: true, user: publicUser(user), message: 'Admin creado/actualizado e inicio de sesión listo.' });
+  const response = json({ ok: true, user: publicUser(user), token, message: 'Admin creado/actualizado e inicio de sesión listo.' });
   response.headers.append('Set-Cookie', buildSessionCookie(request, token, expiresAt));
   return response;
 }
@@ -491,7 +491,7 @@ async function createLoginSession(request: Request, env: Env, user: any): Promis
     .bind(sessionId, user.id, tokenHash, expiresAt)
     .run();
 
-  const response = json({ ok: true, user: publicUser(user) });
+  const response = json({ ok: true, user: publicUser(user), token });
   response.headers.append('Set-Cookie', buildSessionCookie(request, token, expiresAt));
   return response;
 }
@@ -1298,7 +1298,9 @@ async function getFile(request: Request, env: Env): Promise<Response> {
 }
 
 async function requireUser(request: Request, env: Env): Promise<User> {
-  const token = getCookie(request, 'zoe_session');
+  const auth = request.headers.get('Authorization') || '';
+  const bearer = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : '';
+  const token = bearer || getCookie(request, 'zoe_session');
   if (!token) throw httpError('Sesión requerida', 401);
   const tokenHash = await sha256(token);
   const row = await env.DB.prepare(

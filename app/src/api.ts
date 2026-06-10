@@ -1,4 +1,18 @@
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8787';
+const TOKEN_KEY = 'zoe_delivery_token';
+
+export function saveToken(token?: string) {
+  if (token) localStorage.setItem(TOKEN_KEY, token);
+}
+
+export function clearToken() {
+  localStorage.removeItem(TOKEN_KEY);
+}
+
+function authHeader(): Record<string, string> {
+  const token = localStorage.getItem(TOKEN_KEY);
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
 
 export function fileUrl(key?: string | null): string {
   if (!key) return '#';
@@ -9,7 +23,9 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
     credentials: 'include',
-    headers: options.body instanceof FormData ? options.headers : { 'Content-Type': 'application/json', ...(options.headers || {}) },
+    headers: options.body instanceof FormData
+      ? { ...authHeader(), ...(options.headers as any || {}) }
+      : { 'Content-Type': 'application/json', ...authHeader(), ...(options.headers || {}) },
   });
 
   const contentType = res.headers.get('content-type') || '';
@@ -26,9 +42,9 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 }
 
 export const api = {
-  setup: (body: any) => request('/api/setup', { method: 'POST', body: JSON.stringify(body) }),
-  login: (email: string, password: string) => request('/api/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
-  logout: () => request('/api/auth/logout', { method: 'POST' }),
+  setup: async (body: any) => { const data: any = await request('/api/setup', { method: 'POST', body: JSON.stringify(body) }); saveToken(data.token); return data; },
+  login: async (email: string, password: string) => { const data: any = await request('/api/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }); saveToken(data.token); return data; },
+  logout: async () => { const data = await request('/api/auth/logout', { method: 'POST' }); clearToken(); return data; },
   me: () => request<{ user: any }>('/api/auth/me'),
   dashboard: () => request<any>('/api/dashboard'),
   users: (role?: string) => request<{ users: any[] }>(`/api/users${role ? `?role=${role}` : ''}`),
