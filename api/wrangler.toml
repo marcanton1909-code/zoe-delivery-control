@@ -1,0 +1,18 @@
+name = "zoe-delivery-api"
+main = "src/index.ts"
+compatibility_date = "2026-05-20"
+
+[vars]
+ALLOWED_ORIGIN = "http://localhost:5173"
+MAIL_FROM = "Zoé Delivery Control <ventas@mackavi.com>"
+MAIL_COORDINACION = "ventas@mackavi.com"
+APP_NAME = "Zoé Delivery Control"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "zoe-delivery-db"
+database_id = "3e6bef6e-9e61-4bb4-8ac5-845a28c5f898"
+
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "zoe-delivery-files"
