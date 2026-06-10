@@ -24,7 +24,7 @@ export default function Login({ onLoggedIn }: { onLoggedIn: () => void }) {
   async function repairAdmin() {
     setLoading(true); setError(''); setOk('');
     try {
-      await api.setup(name || 'Marco Cruz', email || 'marco.cruz@mackavi.com', password || 'Admin1234!');
+      await api.setup({ name: name || 'Marco Cruz', email: email || 'marco.cruz@mackavi.com', password: password || 'Admin1234!' });
       setOk('Administrador creado/reparado. Entrando al sistema...');
       onLoggedIn();
     } catch (err: any) {
@@ -35,9 +35,10 @@ export default function Login({ onLoggedIn }: { onLoggedIn: () => void }) {
   return (
     <div className="login-shell">
       <form className="login-card" onSubmit={login}>
-        <div className="brand-mark">MW</div>
-        <h1>Mackavi Water Ops</h1>
-        <p>Control interno de entregas Zoé Water: rutas, inventario, evidencias y bitácoras vehiculares.</p>
+        <div className="login-logo-frame"><img src="/mackavi-logo.png" alt="Mackavi Logistics" /></div>
+        <div className="login-kicker">Control interno · Zoé Water</div>
+        <h1>Control interno de entregas</h1>
+        <p>Entregas, evidencia firmada, vehículos, inventario y reportes en una sola consola interna.</p>
         {error && <div className="notice">{error}</div>}
         {ok && <div className="notice ok">{ok}</div>}
         <div className="stack">

@@ -74,7 +74,7 @@ export default function App() {
     location.hash = '';
   }
 
-  if (loading) return <div className="splash">Preparando operación Mackavi...</div>;
+  if (loading) return <div className="splash">Preparando control interno de entregas...</div>;
   if (!user) return <Login onLoggedIn={loadMe} />;
 
   let page = <Dashboard />;
@@ -93,8 +93,8 @@ export default function App() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand-mark small">MW</div>
-          <div><strong>Mackavi Water Ops</strong><span>Zoé · rutas · evidencias</span></div>
+          <img className="brand-logo" src="/mackavi-logo.png" alt="Mackavi Logistics" />
+          <div><strong>Control interno</strong><span>Zoé Water · evidencias · inventario</span></div>
         </div>
         <nav>{nav.map((n) => <a key={n.href} className={route === n.href.replace('#','') ? 'active' : ''} href={n.href}><span className="nav-icon">{iconMap[n.label] || '•'}</span>{n.label}</a>)}</nav>
         <div className="user-box">
