@@ -4,14 +4,14 @@ compatibility_date = "2026-05-20"
 
 [vars]
 ALLOWED_ORIGIN = "http://localhost:5173"
-MAIL_FROM = "Zoé Delivery Control <ventas@mackavi.com>"
-MAIL_COORDINACION = "ventas@mackavi.com"
+MAIL_FROM = "Zoé Delivery Control <entregas@tudominio.com>"
+MAIL_COORDINACION = "coordinacion@tudominio.com"
 APP_NAME = "Zoé Delivery Control"
 
 [[d1_databases]]
 binding = "DB"
 database_name = "zoe-delivery-db"
-database_id = "3e6bef6e-9e61-4bb4-8ac5-845a28c5f898"
+database_id = "REEMPLAZA_CON_DATABASE_ID"
 
 [[r2_buckets]]
 binding = "BUCKET"

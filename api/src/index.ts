@@ -130,6 +130,7 @@ export default {
       let response: Response;
 
       if (url.pathname === '/health') response = json({ ok: true, name: env.APP_NAME || 'Zoé Delivery Control' });
+      else if (url.pathname === '/api/install' && (request.method === 'GET' || request.method === 'POST')) response = await installSchema(env);
       else if (url.pathname === '/api/setup' && request.method === 'POST') response = await setupAdmin(request, env);
       else if (url.pathname === '/api/auth/login' && request.method === 'POST') response = await login(request, env);
       else if (url.pathname === '/api/auth/logout' && request.method === 'POST') response = await logout(request, env);
@@ -198,30 +199,251 @@ async function parseJson<T>(request: Request): Promise<T> {
 }
 
 async function setupAdmin(request: Request, env: Env): Promise<Response> {
-  const count = await env.DB.prepare('SELECT COUNT(*) as total FROM users').first<{ total: number }>();
-  if ((count?.total || 0) > 0) return json({ error: 'El sistema ya tiene usuarios. El setup inicial queda bloqueado.' }, 409);
+  // Instalación simple: si las tablas no existen, las crea automáticamente.
+  // Además, si el correo ya existe, actualiza ese usuario como admin activo y cambia su contraseña.
+  await ensureSchema(env);
 
   const body = await parseJson<{ name: string; email: string; password: string }>(request);
   requireString(body.name, 'name');
   requireEmail(body.email);
   requirePassword(body.password);
 
-  const id = crypto.randomUUID();
+  const email = body.email.trim().toLowerCase();
+  const name = body.name.trim();
   const passwordHash = await hashPassword(body.password);
+  const existing = await env.DB.prepare('SELECT id FROM users WHERE email = ?').bind(email).first<{ id: string }>();
+  const id = existing?.id || crypto.randomUUID();
 
-  await env.DB.prepare(
-    `INSERT INTO users (id, name, email, password_hash, role, active) VALUES (?, ?, ?, ?, 'admin', 1)`
-  )
-    .bind(id, body.name.trim(), body.email.trim().toLowerCase(), passwordHash)
+  if (existing?.id) {
+    await env.DB.prepare(
+      `UPDATE users SET name = ?, password_hash = ?, role = 'admin', active = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
+    ).bind(name, passwordHash, id).run();
+  } else {
+    await env.DB.prepare(
+      `INSERT INTO users (id, name, email, password_hash, role, active) VALUES (?, ?, ?, ?, 'admin', 1)`
+    ).bind(id, name, email, passwordHash).run();
+  }
+
+  // Crea sesión automáticamente para que no tengas que hacer login aparte.
+  const user = await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(id).first<any>();
+  const token = randomToken();
+  const tokenHash = await sha256(token);
+  const sessionId = crypto.randomUUID();
+  const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 14).toISOString();
+
+  await env.DB.prepare('INSERT INTO sessions (id, user_id, token_hash, expires_at) VALUES (?, ?, ?, ?)')
+    .bind(sessionId, id, tokenHash, expiresAt)
     .run();
 
-  return json({ ok: true, user: { id, name: body.name, email: body.email.toLowerCase(), role: 'admin' } });
+  const response = json({ ok: true, user: publicUser(user), message: 'Admin creado/actualizado e inicio de sesión listo.' });
+  response.headers.append('Set-Cookie', buildSessionCookie(request, token, expiresAt));
+  return response;
 }
+
+async function installSchema(env: Env): Promise<Response> {
+  await ensureSchema(env);
+  return json({ ok: true, message: 'Base de datos instalada/verificada correctamente.' });
+}
+
+async function ensureSchema(env: Env): Promise<void> {
+  const statements = SCHEMA_SQL
+    .split(';')
+    .map((statement) => statement.trim())
+    .filter(Boolean);
+
+  for (const statement of statements) {
+    await env.DB.prepare(statement).run();
+  }
+}
+
+const SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  email TEXT UNIQUE NOT NULL,
+  password_hash TEXT NOT NULL,
+  role TEXT NOT NULL CHECK(role IN ('admin', 'coordinador', 'almacen', 'repartidor')),
+  phone TEXT,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS sessions (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE,
+  expires_at TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS routes (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  zone TEXT,
+  default_driver_id TEXT,
+  default_vehicle TEXT,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(default_driver_id) REFERENCES users(id)
+);
+CREATE TABLE IF NOT EXISTS orders (
+  id TEXT PRIMARY KEY,
+  zoe_folio TEXT UNIQUE NOT NULL,
+  order_date TEXT,
+  scheduled_delivery_date TEXT,
+  customer_name TEXT NOT NULL,
+  customer_address TEXT NOT NULL,
+  customer_phone TEXT,
+  packages_expected INTEGER NOT NULL DEFAULT 0,
+  packages_loaded INTEGER NOT NULL DEFAULT 0,
+  packages_delivered INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'pendiente_validacion' CHECK(status IN ('pendiente_validacion','programada','cargada','carga_incompleta','en_ruta','entregada','parcial','no_entregada','rechazada','cancelada')),
+  route_id TEXT,
+  driver_id TEXT,
+  vehicle TEXT,
+  original_pdf_key TEXT,
+  signed_pdf_key TEXT,
+  notes TEXT,
+  created_by TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(route_id) REFERENCES routes(id),
+  FOREIGN KEY(driver_id) REFERENCES users(id),
+  FOREIGN KEY(created_by) REFERENCES users(id)
+);
+CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
+CREATE INDEX IF NOT EXISTS idx_orders_driver ON orders(driver_id);
+CREATE INDEX IF NOT EXISTS idx_orders_scheduled_delivery_date ON orders(scheduled_delivery_date);
+CREATE INDEX IF NOT EXISTS idx_orders_route ON orders(route_id);
+CREATE TABLE IF NOT EXISTS load_validations (
+  id TEXT PRIMARY KEY,
+  order_id TEXT NOT NULL,
+  packages_expected INTEGER NOT NULL,
+  packages_loaded INTEGER NOT NULL,
+  validation_result TEXT NOT NULL CHECK(validation_result IN ('completa', 'incompleta', 'bloqueada')),
+  comments TEXT,
+  validated_by TEXT,
+  validated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(order_id) REFERENCES orders(id) ON DELETE CASCADE,
+  FOREIGN KEY(validated_by) REFERENCES users(id)
+);
+CREATE TABLE IF NOT EXISTS delivery_evidence (
+  id TEXT PRIMARY KEY,
+  order_id TEXT NOT NULL,
+  receiver_name TEXT,
+  signature_key TEXT,
+  photo_key TEXT,
+  gps_lat REAL,
+  gps_lng REAL,
+  delivered_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  delivery_result TEXT NOT NULL CHECK(delivery_result IN ('completa', 'parcial', 'no_entregada', 'rechazada')),
+  packages_delivered INTEGER NOT NULL DEFAULT 0,
+  comments TEXT,
+  created_by TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(order_id) REFERENCES orders(id) ON DELETE CASCADE,
+  FOREIGN KEY(created_by) REFERENCES users(id)
+);
+CREATE INDEX IF NOT EXISTS idx_evidence_order ON delivery_evidence(order_id);
+CREATE INDEX IF NOT EXISTS idx_evidence_delivered_at ON delivery_evidence(delivered_at);
+CREATE TABLE IF NOT EXISTS incidents (
+  id TEXT PRIMARY KEY,
+  order_id TEXT,
+  type TEXT NOT NULL CHECK(type IN ('cliente_ausente','direccion_incorrecta','pedido_incompleto','rechazo_cliente','unidad_con_problema','otro')),
+  description TEXT,
+  photo_key TEXT,
+  created_by TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(order_id) REFERENCES orders(id) ON DELETE CASCADE,
+  FOREIGN KEY(created_by) REFERENCES users(id)
+);
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id TEXT PRIMARY KEY,
+  user_id TEXT,
+  action TEXT NOT NULL,
+  entity_type TEXT NOT NULL,
+  entity_id TEXT,
+  details TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(user_id) REFERENCES users(id)
+);
+CREATE TABLE IF NOT EXISTS vehicle_checklists (
+  id TEXT PRIMARY KEY,
+  checklist_date TEXT NOT NULL,
+  vehicle TEXT NOT NULL,
+  route_id TEXT,
+  driver_id TEXT,
+  reviewer_name TEXT NOT NULL,
+  mileage INTEGER NOT NULL,
+  fuel_level TEXT NOT NULL CHECK(fuel_level IN ('tanque_lleno', 'tres_cuartos', 'medio_tanque', 'un_cuarto', 'reserva')),
+  tires_ok INTEGER NOT NULL DEFAULT 1,
+  spare_tire_ok INTEGER NOT NULL DEFAULT 1,
+  mileage_photo_key TEXT,
+  fuel_photo_key TEXT,
+  tires_photo_key TEXT,
+  spare_tire_photo_key TEXT,
+  comments TEXT,
+  created_by TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(route_id) REFERENCES routes(id),
+  FOREIGN KEY(driver_id) REFERENCES users(id),
+  FOREIGN KEY(created_by) REFERENCES users(id)
+);
+CREATE INDEX IF NOT EXISTS idx_vehicle_checklists_date ON vehicle_checklists(checklist_date);
+CREATE INDEX IF NOT EXISTS idx_vehicle_checklists_vehicle ON vehicle_checklists(vehicle);
+CREATE TABLE IF NOT EXISTS inventory_products (
+  id TEXT PRIMARY KEY,
+  sku TEXT UNIQUE,
+  name TEXT NOT NULL,
+  category TEXT,
+  unit TEXT NOT NULL DEFAULT 'pieza',
+  presentation TEXT,
+  min_stock INTEGER NOT NULL DEFAULT 0,
+  current_stock INTEGER NOT NULL DEFAULT 0,
+  active INTEGER NOT NULL DEFAULT 1,
+  notes TEXT,
+  created_by TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(created_by) REFERENCES users(id)
+);
+CREATE INDEX IF NOT EXISTS idx_inventory_products_active ON inventory_products(active);
+CREATE INDEX IF NOT EXISTS idx_inventory_products_name ON inventory_products(name);
+CREATE TABLE IF NOT EXISTS inventory_movements (
+  id TEXT PRIMARY KEY,
+  product_id TEXT NOT NULL,
+  movement_type TEXT NOT NULL CHECK(movement_type IN ('inicial', 'entrada', 'salida', 'ajuste')),
+  quantity INTEGER NOT NULL,
+  previous_stock INTEGER NOT NULL,
+  new_stock INTEGER NOT NULL,
+  reference TEXT,
+  notes TEXT,
+  created_by TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(product_id) REFERENCES inventory_products(id) ON DELETE CASCADE,
+  FOREIGN KEY(created_by) REFERENCES users(id)
+);
+CREATE INDEX IF NOT EXISTS idx_inventory_movements_product ON inventory_movements(product_id);
+CREATE INDEX IF NOT EXISTS idx_inventory_movements_created ON inventory_movements(created_at);
+`;
+
+const DEFAULT_ADMIN_EMAIL = 'marco.cruz@mackavi.com';
+const DEFAULT_ADMIN_PASSWORD = 'Admin1234!';
+const DEFAULT_ADMIN_NAME = 'Marco Cruz';
 
 async function login(request: Request, env: Env): Promise<Response> {
   const body = await parseJson<{ email: string; password: string }>(request);
   const email = body.email?.trim().toLowerCase();
   const password = body.password || '';
+
+  // Acceso inicial simplificado: si se intenta entrar con el admin definido,
+  // la API crea/verifica tablas, crea o repara el usuario admin y abre sesión.
+  // Esto evita usar curl o insertar usuarios manualmente en D1.
+  if (email === DEFAULT_ADMIN_EMAIL && password === DEFAULT_ADMIN_PASSWORD) {
+    return upsertDefaultAdminAndLogin(request, env);
+  }
 
   const user = await env.DB.prepare('SELECT * FROM users WHERE email = ? AND active = 1').bind(email).first<any>();
   if (!user) return json({ error: 'Correo o contraseña incorrectos' }, 401);
@@ -229,6 +451,37 @@ async function login(request: Request, env: Env): Promise<Response> {
   const ok = await verifyPassword(password, user.password_hash);
   if (!ok) return json({ error: 'Correo o contraseña incorrectos' }, 401);
 
+  return createLoginSession(request, env, user);
+}
+
+async function upsertDefaultAdminAndLogin(request: Request, env: Env): Promise<Response> {
+  await ensureSchema(env);
+
+  const passwordHash = await hashPassword(DEFAULT_ADMIN_PASSWORD);
+  const existing = await env.DB.prepare('SELECT id FROM users WHERE email = ?')
+    .bind(DEFAULT_ADMIN_EMAIL)
+    .first<{ id: string }>();
+
+  const id = existing?.id || 'admin-marco-cruz';
+
+  if (existing?.id) {
+    await env.DB.prepare(
+      `UPDATE users
+       SET name = ?, password_hash = ?, role = 'admin', active = 1, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`
+    ).bind(DEFAULT_ADMIN_NAME, passwordHash, id).run();
+  } else {
+    await env.DB.prepare(
+      `INSERT INTO users (id, name, email, password_hash, role, active)
+       VALUES (?, ?, ?, ?, 'admin', 1)`
+    ).bind(id, DEFAULT_ADMIN_NAME, DEFAULT_ADMIN_EMAIL, passwordHash).run();
+  }
+
+  const user = await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(id).first<any>();
+  return createLoginSession(request, env, user);
+}
+
+async function createLoginSession(request: Request, env: Env, user: any): Promise<Response> {
   const token = randomToken();
   const tokenHash = await sha256(token);
   const sessionId = crypto.randomUUID();
