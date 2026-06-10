@@ -8,3 +8,5 @@ export function Field({ label, children }: { label: string; children: ReactNode 
     </label>
   );
 }
+
+export default Field;
