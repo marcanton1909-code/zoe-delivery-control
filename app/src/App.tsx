@@ -18,6 +18,17 @@ function getHash() {
   return location.hash.replace('#', '') || '/dashboard';
 }
 
+const iconMap: Record<string, string> = {
+  Dashboard: '⌁',
+  Órdenes: '◫',
+  Almacén: '▣',
+  'Bitácora vehículo': '◉',
+  Inventarios: '▤',
+  Repartidor: '↗',
+  Reportes: '◌',
+  'Config.': '⚙',
+};
+
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -63,7 +74,7 @@ export default function App() {
     location.hash = '';
   }
 
-  if (loading) return <div className="splash">Cargando Zoé Delivery Control...</div>;
+  if (loading) return <div className="splash">Preparando operación Mackavi...</div>;
   if (!user) return <Login onLoggedIn={loadMe} />;
 
   let page = <Dashboard />;
@@ -82,14 +93,14 @@ export default function App() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand-mark small">ZW</div>
-          <div><strong>Zoé Delivery</strong><span>Control interno</span></div>
+          <div className="brand-mark small">MW</div>
+          <div><strong>Mackavi Water Ops</strong><span>Zoé · rutas · evidencias</span></div>
         </div>
-        <nav>{nav.map((n) => <a key={n.href} className={route === n.href.replace('#','') ? 'active' : ''} href={n.href}>{n.label}</a>)}</nav>
+        <nav>{nav.map((n) => <a key={n.href} className={route === n.href.replace('#','') ? 'active' : ''} href={n.href}><span className="nav-icon">{iconMap[n.label] || '•'}</span>{n.label}</a>)}</nav>
         <div className="user-box">
           <strong>{user.name}</strong>
-          <span>{user.role}</span>
-          <button className="btn ghost" onClick={logout}>Salir</button>
+          <span>{user.role} · sesión activa</span>
+          <button className="btn ghost" onClick={logout}>Cerrar sesión</button>
         </div>
       </aside>
       <main className="content">{page}</main>

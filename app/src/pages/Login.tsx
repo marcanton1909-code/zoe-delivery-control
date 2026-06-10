@@ -1,55 +1,59 @@
-import { FormEvent, useState } from 'react';
+import { useState } from 'react';
 import { api } from '../api';
+import Field from '../components/Field';
 
 export default function Login({ onLoggedIn }: { onLoggedIn: () => void }) {
-  const [mode, setMode] = useState<'login' | 'setup'>('login');
   const [email, setEmail] = useState('marco.cruz@mackavi.com');
   const [password, setPassword] = useState('Admin1234!');
   const [name, setName] = useState('Marco Cruz');
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [ok, setOk] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  async function submit(e: FormEvent) {
+  async function login(e: React.FormEvent) {
     e.preventDefault();
-    setLoading(true);
-    setError('');
+    setLoading(true); setError(''); setOk('');
     try {
-      if (mode === 'setup') {
-        await api.setup({ name, email, password });
-        onLoggedIn();
-      } else {
-        await api.login(email, password);
-        onLoggedIn();
-      }
+      await api.login(email, password);
+      onLoggedIn();
     } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
+      setError(err.message || 'No se pudo iniciar sesión');
+    } finally { setLoading(false); }
+  }
+
+  async function repairAdmin() {
+    setLoading(true); setError(''); setOk('');
+    try {
+      await api.setup(name || 'Marco Cruz', email || 'marco.cruz@mackavi.com', password || 'Admin1234!');
+      setOk('Administrador creado/reparado. Entrando al sistema...');
+      onLoggedIn();
+    } catch (err: any) {
+      setError(err.message || 'No se pudo crear administrador');
+    } finally { setLoading(false); }
   }
 
   return (
-    <main className="login-shell">
-      <section className="login-card">
-        <div className="brand-mark">ZW</div>
-        <h1>Zoé Delivery Control</h1>
-        <p>Control interno de entregas, firmas, evidencias, vehículos e inventarios.</p>
-        <div className="notice ok">Usuario admin inicial precargado: marco.cruz@mackavi.com</div>
-
-        <form onSubmit={submit} className="stack">
-          {mode === 'setup' && (
-            <label className="field"><span>Nombre admin</span><input value={name} onChange={(e) => setName(e.target.value)} required /></label>
-          )}
-          <label className="field"><span>Correo</span><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required /></label>
-          <label className="field"><span>Contraseña</span><input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={8} /></label>
-          {error && <div className={error.includes('creado') ? 'notice ok' : 'notice'}>{error}</div>}
-          <button className="btn primary" disabled={loading}>{loading ? 'Procesando...' : mode === 'login' ? 'Ingresar' : 'Crear / entrar como admin'}</button>
-        </form>
-
-        <button className="link-button" onClick={() => setMode(mode === 'login' ? 'setup' : 'login')}>
-          {mode === 'login' ? 'Crear / reparar administrador' : 'Volver a login'}
-        </button>
-      </section>
-    </main>
+    <div className="login-shell">
+      <form className="login-card" onSubmit={login}>
+        <div className="brand-mark">MW</div>
+        <h1>Mackavi Water Ops</h1>
+        <p>Control interno de entregas Zoé Water: rutas, inventario, evidencias y bitácoras vehiculares.</p>
+        {error && <div className="notice">{error}</div>}
+        {ok && <div className="notice ok">{ok}</div>}
+        <div className="stack">
+          <Field label="Nombre admin">
+            <input value={name} onChange={(e) => setName(e.target.value)} />
+          </Field>
+          <Field label="Correo">
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+          </Field>
+          <Field label="Contraseña">
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+          </Field>
+          <button className="btn primary big" disabled={loading}>{loading ? 'Validando...' : 'Entrar al control'}</button>
+          <button className="btn" type="button" disabled={loading} onClick={repairAdmin}>Crear / reparar administrador</button>
+        </div>
+      </form>
+    </div>
   );
 }

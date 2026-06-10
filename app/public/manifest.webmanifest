@@ -1,15 +1,11 @@
 {
-  "name": "Zoé Delivery Control",
-  "short_name": "Zoé Delivery",
+  "name": "Mackavi Water Ops",
+  "short_name": "MW Ops",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#f8fafc",
-  "theme_color": "#0f172a",
+  "background_color": "#eef4f1",
+  "theme_color": "#052e2b",
   "icons": [
-    {
-      "src": "/icon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml"
-    }
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }
   ]
 }

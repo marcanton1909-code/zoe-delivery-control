@@ -10,7 +10,7 @@ export default function Dashboard() {
   }, []);
 
   if (error) return <div className="notice">{error}</div>;
-  if (!data) return <div className="muted">Cargando dashboard...</div>;
+  if (!data) return <div className="muted">Cargando tablero operativo...</div>;
 
   const statusMap = Object.fromEntries((data.byStatus || []).map((x: any) => [x.status, x.total]));
   const cards = [
@@ -26,12 +26,23 @@ export default function Dashboard() {
 
   return (
     <div className="page">
-      <div className="page-title">
+      <section className="ops-hero">
         <div>
-          <h2>Dashboard operativo</h2>
-          <p>Resumen de entregas y paquetes.</p>
+          <div className="page-kicker">Centro de control</div>
+          <h2>Operación de entregas Zoé</h2>
+          <p>Rutas, evidencia firmada, bitácora vehicular e inventario en un mismo tablero interno.</p>
+          <div className="ops-badges">
+            <span className="ops-pill">Mackavi Logistics</span>
+            <span className="ops-pill">Evidencia digital</span>
+            <span className="ops-pill">Cloudflare</span>
+          </div>
         </div>
-      </div>
+        <div className="ops-panel">
+          <div className="route-tile"><span>Paquetes entregados hoy</span><strong>{data.todayStats?.packages_today || 0}</strong></div>
+          <div className="route-tile"><span>Órdenes en ruta</span><strong>{statusMap.en_ruta || 0}</strong></div>
+        </div>
+      </section>
+
       <div className="metric-grid">
         {cards.map(([label, value]) => (
           <div className="metric-card" key={label as string}>
@@ -42,7 +53,7 @@ export default function Dashboard() {
       </div>
 
       <section className="card">
-        <h3>Entregas por repartidor este mes</h3>
+        <h3>Rendimiento por repartidor este mes</h3>
         <div className="table-wrap">
           <table>
             <thead><tr><th>Repartidor</th><th>Entregas</th><th>Paquetes</th></tr></thead>
