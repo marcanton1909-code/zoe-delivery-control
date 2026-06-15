@@ -30,14 +30,78 @@ export interface Route {
   default_vehicle?: string;
 }
 
+export interface Customer {
+  id: string;
+  company_name?: string;
+  contact_name?: string;
+  phone?: string;
+  email?: string;
+  delivery_address?: string;
+  delivery_references?: string;
+  notes?: string;
+  total_orders?: number;
+  last_order_at?: string;
+  packages_delivered?: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OrderItem {
+  id?: string;
+  order_id?: string;
+  quantity: number;
+  description: string;
+  unit_price?: number;
+  amount?: number;
+  sort_order?: number;
+}
+
+export interface ExtractedOrderDraft {
+  zoe_folio?: string;
+  customer_company?: string;
+  customer_name?: string;
+  customer_contact_name?: string;
+  customer_email?: string;
+  customer_phone?: string;
+  customer_address?: string;
+  delivery_reference?: string;
+  payment_note?: string;
+  order_total?: number;
+  packages_expected?: number;
+  items?: OrderItem[];
+}
+
+export interface DeliveryEvidence {
+  id: string;
+  order_id: string;
+  receiver_name?: string;
+  signature_key?: string;
+  photo_key?: string;
+  gps_lat?: number;
+  gps_lng?: number;
+  delivered_at?: string;
+  delivery_result?: 'completa' | 'parcial' | 'no_entregada' | 'rechazada';
+  packages_delivered?: number;
+  comments?: string;
+  created_by?: string;
+  created_at?: string;
+}
+
 export interface Order {
   id: string;
+  customer_id?: string;
   zoe_folio: string;
   order_date?: string;
   scheduled_delivery_date?: string;
+  customer_company?: string;
   customer_name: string;
+  customer_contact_name?: string;
+  customer_email?: string;
   customer_address: string;
   customer_phone?: string;
+  delivery_reference?: string;
+  payment_note?: string;
+  order_total?: number;
   packages_expected: number;
   packages_loaded: number;
   packages_delivered: number;
@@ -50,10 +114,10 @@ export interface Order {
   original_pdf_key?: string;
   signed_pdf_key?: string;
   notes?: string;
+  items?: OrderItem[];
   created_at: string;
   updated_at: string;
 }
-
 
 export type FuelLevel = 'tanque_lleno' | 'tres_cuartos' | 'medio_tanque' | 'un_cuarto' | 'reserva';
 
@@ -78,7 +142,6 @@ export interface VehicleChecklist {
   created_by_name?: string;
   created_at: string;
 }
-
 
 export interface InventoryProduct {
   id: string;

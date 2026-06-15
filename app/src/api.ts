@@ -16,7 +16,9 @@ function authHeader(): Record<string, string> {
 
 export function fileUrl(key?: string | null): string {
   if (!key) return '#';
-  return `${API_BASE}/api/files/${encodeURIComponent(key)}`;
+  const token = localStorage.getItem(TOKEN_KEY);
+  const qs = token ? `?token=${encodeURIComponent(token)}` : '';
+  return `${API_BASE}/api/files/${encodeURIComponent(key)}${qs}`;
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -49,11 +51,15 @@ export const api = {
   dashboard: () => request<any>('/api/dashboard'),
   users: (role?: string) => request<{ users: any[] }>(`/api/users${role ? `?role=${role}` : ''}`),
   createUser: (body: any) => request('/api/users', { method: 'POST', body: JSON.stringify(body) }),
+
+  customers: (query = '') => request<{ customers: any[] }>(`/api/customers${query}`),
+  customer: (id: string) => request<{ customer: any; orders: any[] }>(`/api/customers/${id}`),
   routes: () => request<{ routes: any[] }>('/api/routes'),
   createRoute: (body: any) => request('/api/routes', { method: 'POST', body: JSON.stringify(body) }),
   orders: (query = '') => request<{ orders: any[] }>(`/api/orders${query}`),
   order: (id: string) => request<any>(`/api/orders/${id}`),
   createOrder: (form: FormData) => request('/api/orders', { method: 'POST', body: form }),
+  extractOrderPdf: (form: FormData) => request<any>('/api/orders/extract-pdf', { method: 'POST', body: form }),
   updateOrder: (id: string, body: any) => request(`/api/orders/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   validateLoad: (id: string, body: any) => request(`/api/orders/${id}/validate-load`, { method: 'POST', body: JSON.stringify(body) }),
   startRoute: (id: string) => request(`/api/orders/${id}/start-route`, { method: 'POST' }),

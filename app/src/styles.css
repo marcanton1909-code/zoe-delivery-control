@@ -434,3 +434,169 @@ td { color:#e9e4d3; }
 .brand span, .user-box span, .metric-card span, .stat span, .route-tile span, .detail-grid span {
   font-weight: 450;
 }
+
+
+/* Zoé proof of delivery reconstructed document */
+.proof-page { max-width: 980px; }
+.proof-capture-page { max-width: 980px; }
+.proof-actions { display:flex; align-items:center; justify-content:space-between; gap:14px; margin-bottom:18px; }
+.delivery-control-panel { margin-bottom:18px; }
+.compact-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.zoe-proof {
+  position: relative;
+  width: min(100%, 900px);
+  margin: 0 auto 22px;
+  background: #f7f4ef;
+  color: #25201b;
+  border: 1px solid rgba(0,0,0,.22);
+  box-shadow: 0 24px 80px rgba(0,0,0,.35);
+  padding: 42px 44px 34px;
+  font-family: Georgia, 'Times New Roman', serif;
+  letter-spacing: 0;
+  border-radius: 4px;
+}
+.zoe-proof-compact { transform: scale(.86); transform-origin: top center; margin-bottom: -58px; }
+.zoe-proof-header { display:grid; grid-template-columns: 210px 1fr; gap: 20px; align-items:start; }
+.zoe-logo-text { text-align:center; color:#6c6c6c; line-height:.82; margin-top:2px; }
+.zoe-logo-text strong { display:block; font-size:58px; font-weight:900; letter-spacing:-.08em; font-family: Arial, Helvetica, sans-serif; }
+.zoe-logo-text span { display:block; font-size:12px; letter-spacing:.56em; font-family: Arial, Helvetica, sans-serif; margin-left:8px; }
+.zoe-order-title { text-align:right; font-family: Arial, Helvetica, sans-serif; }
+.zoe-order-title h2 { margin:0 0 14px; font-size:28px; line-height:1; font-weight:700; color:#252525; }
+.zoe-order-title p { margin:3px 0; font-size:13px; color:#3f3f3f; }
+.zoe-proof-grid { display:grid; grid-template-columns: 260px 1fr; gap: 16px 28px; margin: 18px 0 24px; align-items:start; }
+.zoe-box { border: 2px solid #3c3c3c; background:#fbfaf8; }
+.zoe-box-title { border-bottom: 2px solid #3c3c3c; text-align:center; padding:5px 8px; font: 700 12px/1 Arial, Helvetica, sans-serif; }
+.zoe-box p { margin:0; padding:9px 12px; min-height:58px; font-size:14px; line-height:1.35; }
+.reference-box { grid-column: 1; }
+.zoe-client-block { justify-self:end; width: 300px; font: 14px/1.45 Arial, Helvetica, sans-serif; color:#3b3b3b; padding-top:8px; }
+.zoe-client-block p { margin:6px 0; }
+.zoe-client-block span { display:inline-block; min-width:76px; color:#555; }
+.zoe-proof-table-wrap { margin: 8px auto 22px; max-width: 610px; }
+.zoe-proof-table { width:100%; border-collapse:collapse; font: 12px/1.25 Arial, Helvetica, sans-serif; background:#fbfaf8; color:#252525; }
+.zoe-proof-table th, .zoe-proof-table td { border:1.6px solid #555; padding:6px 8px; vertical-align:middle; }
+.zoe-proof-table th { font-weight:600; text-align:center; background:#f2f0ea; }
+.zoe-proof-table td:first-child { text-align:center; width:70px; }
+.zoe-proof-table td:nth-child(3), .zoe-proof-table td:nth-child(4) { text-align:right; white-space:nowrap; width:112px; }
+.zoe-proof-table .total-row td { font-weight:700; }
+.zoe-proof-bottom { display:grid; grid-template-columns: 40px 1fr 130px; gap: 22px; align-items:end; min-height: 250px; }
+.zoe-side-text { writing-mode: vertical-rl; transform: rotate(180deg); font-size:13px; color:#3c3c3c; display:flex; gap:32px; align-items:center; }
+.zoe-payment-block { text-align:center; align-self:end; }
+.zoe-payment-block h3 { margin: 0 0 30px; font-size:28px; font-weight:700; color:#202020; }
+.zoe-signature-row { display:grid; grid-template-columns: 1fr 1.6fr; gap: 28px; align-items:end; }
+.zoe-date-line, .zoe-signature-line { min-height:68px; display:flex; flex-direction:column; justify-content:flex-end; gap:4px; }
+.zoe-date-line strong, .zoe-signature-line strong { display:block; min-height:24px; font-size:15px; color:#1d1d1d; font-family: Arial, Helvetica, sans-serif; }
+.zoe-date-line::before, .zoe-signature-line::before { content:''; display:block; border-bottom: 1.6px solid #6a6a6a; width:100%; }
+.zoe-date-line span, .zoe-signature-line span { font-size:14px; color:#555; }
+.zoe-signature-field { min-height:98px; display:grid; place-items:center; margin-bottom:6px; }
+.zoe-signature-field img { max-width:260px; max-height:92px; object-fit:contain; mix-blend-mode:multiply; }
+.zoe-signature-field .signature-wrap { width:100%; background:#fff; border:1px solid #b8b8b8; border-radius:8px; }
+.zoe-signature-field .signature-canvas { height:120px; }
+.zoe-signature-field .signature-actions { color:#333; padding:4px 8px 8px; }
+.zoe-inline-input { width:100%; border:0; border-bottom:1px solid #888; background:transparent; color:#111; text-align:center; padding:10px 4px 6px; outline:none; font: 15px Arial, Helvetica, sans-serif; }
+.zoe-qr-placeholder { align-self:end; justify-self:center; width:116px; height:116px; background:#fff; border:6px solid #111; padding:8px; }
+.qr-grid { width:100%; height:100%; background:
+  linear-gradient(90deg,#111 10px,transparent 10px 20px,#111 20px 28px,transparent 28px 38px,#111 38px 52px,transparent 52px),
+  linear-gradient(#111 8px,transparent 8px 18px,#111 18px 27px,transparent 27px 42px,#111 42px 55px,transparent 55px);
+  background-size:52px 55px; opacity:.9; }
+.zoe-photo-proof { margin-top:16px; padding:12px 14px; border-radius:14px; background: rgba(217,31,31,.08); display:flex; justify-content:space-between; font-family:var(--app-font, inherit); }
+.order-items-editor { border:1px solid var(--line); border-radius:22px; padding:18px; background: rgba(255,255,255,.035); display:grid; gap:12px; }
+.section-head-inline { display:flex; justify-content:space-between; gap:18px; align-items:flex-start; }
+.section-head-inline h3 { margin:0 0 3px; }
+.section-head-inline p { margin:0; color:var(--muted); }
+.item-row-editor { display:grid; grid-template-columns: 92px 1fr 132px 132px 86px; gap:10px; align-items:end; }
+.item-row-editor label { display:grid; gap:6px; color:var(--muted); font-size:12px; }
+.item-row-editor input { width:100%; }
+.order-total-preview { display:flex; justify-content:flex-end; align-items:center; gap:10px; color:var(--muted); padding-top:8px; }
+.order-total-preview strong { color:var(--cream); font-size:18px; }
+.sticky-save-bar { position: sticky; bottom: 12px; display:flex; justify-content:center; padding:12px; background: rgba(8,7,6,.72); border:1px solid rgba(255,255,255,.08); backdrop-filter: blur(14px); border-radius:22px; margin-top:14px; z-index:10; }
+@media (max-width: 820px) {
+  .proof-actions { display:grid; }
+  .zoe-proof { padding:24px 18px; overflow:hidden; }
+  .zoe-proof-header { grid-template-columns: 1fr; }
+  .zoe-order-title { text-align:left; }
+  .zoe-proof-grid { grid-template-columns:1fr; }
+  .zoe-client-block { justify-self:stretch; width:auto; }
+  .zoe-proof-table-wrap { overflow:auto; max-width:100%; }
+  .zoe-proof-bottom { grid-template-columns:1fr; min-height:auto; }
+  .zoe-side-text { writing-mode: initial; transform:none; flex-direction:column; gap:4px; align-items:flex-start; }
+  .zoe-signature-row { grid-template-columns:1fr; gap:14px; }
+  .zoe-qr-placeholder { display:none; }
+  .item-row-editor { grid-template-columns: 1fr; }
+  .compact-grid { grid-template-columns: 1fr; }
+}
+@media print {
+  body { background:white !important; }
+  .sidebar, .bottom-nav, .no-print, .sticky-save-bar { display:none !important; }
+  .app-shell { display:block; }
+  .content { padding:0; }
+  .zoe-proof { box-shadow:none; border:0; border-radius:0; width:100%; margin:0; background:white; color:#111; page-break-inside:avoid; }
+  .zoe-proof-compact { transform:none; margin:0; }
+}
+
+/* PDF import + customer database */
+.pdf-import-card {
+  border: 1px solid rgba(226, 29, 29, 0.25);
+  background: linear-gradient(135deg, rgba(255,255,255,0.98), rgba(255,247,235,0.9));
+}
+
+.pdf-import-row {
+  align-items: flex-end;
+}
+
+.pdf-import-result {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+  padding: 14px;
+  border-radius: 18px;
+  background: rgba(15, 15, 15, 0.04);
+  border: 1px solid rgba(15, 15, 15, 0.08);
+}
+
+.pdf-import-result span {
+  display: block;
+  font-size: 12px;
+  color: var(--muted, #6b7280);
+  margin-bottom: 3px;
+}
+
+.pdf-import-result strong {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.pdf-import-result p {
+  margin: 0;
+  grid-column: 1 / -1;
+  color: var(--muted, #6b7280);
+}
+
+.raw-preview {
+  margin-top: 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(15, 15, 15, 0.08);
+  padding: 10px 12px;
+  background: rgba(255,255,255,0.7);
+}
+
+.raw-preview summary {
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.raw-preview pre {
+  white-space: pre-wrap;
+  max-height: 240px;
+  overflow: auto;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.customer-search {
+  min-width: min(520px, 100%);
+}
+
+.customer-detail-card h4 {
+  margin: 24px 0 10px;
+}

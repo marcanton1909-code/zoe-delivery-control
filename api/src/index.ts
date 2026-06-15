@@ -92,14 +92,64 @@ interface InventoryMovementRow {
   created_by_name?: string | null;
 }
 
+interface OrderItemRow {
+  id: string;
+  order_id: string;
+  quantity: number;
+  description: string;
+  unit_price: number;
+  amount: number;
+  sort_order: number;
+}
+
+
+interface CustomerRow {
+  id: string;
+  company_name: string | null;
+  contact_name: string | null;
+  phone: string | null;
+  email: string | null;
+  delivery_address: string | null;
+  delivery_references: string | null;
+  notes: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  total_orders?: number;
+  last_order_at?: string | null;
+  packages_delivered?: number;
+}
+
+interface ParsedOrderDraft {
+  zoe_folio?: string;
+  customer_company?: string;
+  customer_name?: string;
+  customer_contact_name?: string;
+  customer_email?: string;
+  customer_phone?: string;
+  customer_address?: string;
+  delivery_reference?: string;
+  payment_note?: string;
+  order_total?: number;
+  packages_expected?: number;
+  items?: OrderItemRow[];
+}
+
 interface OrderRow {
   id: string;
+  customer_id?: string | null;
   zoe_folio: string;
   order_date: string | null;
   scheduled_delivery_date: string | null;
+  customer_company: string | null;
   customer_name: string;
+  customer_contact_name: string | null;
+  customer_email: string | null;
   customer_address: string;
   customer_phone: string | null;
+  delivery_reference: string | null;
+  payment_note: string | null;
+  order_total: number | null;
   packages_expected: number;
   packages_loaded: number;
   packages_delivered: number;
@@ -115,6 +165,7 @@ interface OrderRow {
   updated_at: string;
   route_name?: string | null;
   driver_name?: string | null;
+  items?: OrderItemRow[];
 }
 
 const jsonHeaders = { 'content-type': 'application/json; charset=utf-8' };
@@ -138,10 +189,13 @@ export default {
       else if (url.pathname === '/api/dashboard' && request.method === 'GET') response = await dashboard(request, env);
       else if (url.pathname === '/api/users' && request.method === 'GET') response = await listUsers(request, env);
       else if (url.pathname === '/api/users' && request.method === 'POST') response = await createUser(request, env);
+      else if (url.pathname === '/api/customers' && request.method === 'GET') response = await listCustomers(request, env);
+      else if (url.pathname.match(/^\/api\/customers\/[^/]+$/) && request.method === 'GET') response = await getCustomer(request, env);
       else if (url.pathname === '/api/routes' && request.method === 'GET') response = await listRoutes(request, env);
       else if (url.pathname === '/api/routes' && request.method === 'POST') response = await createRoute(request, env);
       else if (url.pathname === '/api/orders' && request.method === 'GET') response = await listOrders(request, env);
       else if (url.pathname === '/api/orders' && request.method === 'POST') response = await createOrder(request, env);
+      else if (url.pathname === '/api/orders/extract-pdf' && request.method === 'POST') response = await extractOrderPdf(request, env);
       else if (url.pathname === '/api/vehicle-checklists' && request.method === 'GET') response = await listVehicleChecklists(request, env);
       else if (url.pathname === '/api/vehicle-checklists' && request.method === 'POST') response = await createVehicleChecklist(request, env);
       else if (url.pathname === '/api/inventory/products' && request.method === 'GET') response = await listInventoryProducts(request, env);
@@ -287,14 +341,47 @@ CREATE TABLE IF NOT EXISTS routes (
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY(default_driver_id) REFERENCES users(id)
 );
+CREATE TABLE IF NOT EXISTS customers (
+  id TEXT PRIMARY KEY,
+  company_name TEXT,
+  contact_name TEXT,
+  phone TEXT,
+  email TEXT,
+  delivery_address TEXT,
+  delivery_references TEXT,
+  notes TEXT,
+  created_by TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(created_by) REFERENCES users(id)
+);
+CREATE INDEX IF NOT EXISTS idx_customers_company ON customers(company_name);
+CREATE INDEX IF NOT EXISTS idx_customers_contact ON customers(contact_name);
+CREATE INDEX IF NOT EXISTS idx_customers_email ON customers(email);
+CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone);
+CREATE TABLE IF NOT EXISTS customer_orders (
+  id TEXT PRIMARY KEY,
+  customer_id TEXT NOT NULL,
+  order_id TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(customer_id) REFERENCES customers(id) ON DELETE CASCADE,
+  FOREIGN KEY(order_id) REFERENCES orders(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_customer_orders_customer ON customer_orders(customer_id);
 CREATE TABLE IF NOT EXISTS orders (
   id TEXT PRIMARY KEY,
   zoe_folio TEXT UNIQUE NOT NULL,
   order_date TEXT,
   scheduled_delivery_date TEXT,
+  customer_company TEXT,
   customer_name TEXT NOT NULL,
+  customer_contact_name TEXT,
+  customer_email TEXT,
   customer_address TEXT NOT NULL,
   customer_phone TEXT,
+  delivery_reference TEXT,
+  payment_note TEXT,
+  order_total REAL DEFAULT 0,
   packages_expected INTEGER NOT NULL DEFAULT 0,
   packages_loaded INTEGER NOT NULL DEFAULT 0,
   packages_delivered INTEGER NOT NULL DEFAULT 0,
@@ -316,6 +403,18 @@ CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
 CREATE INDEX IF NOT EXISTS idx_orders_driver ON orders(driver_id);
 CREATE INDEX IF NOT EXISTS idx_orders_scheduled_delivery_date ON orders(scheduled_delivery_date);
 CREATE INDEX IF NOT EXISTS idx_orders_route ON orders(route_id);
+CREATE TABLE IF NOT EXISTS order_items (
+  id TEXT PRIMARY KEY,
+  order_id TEXT NOT NULL,
+  quantity INTEGER NOT NULL DEFAULT 0,
+  description TEXT NOT NULL,
+  unit_price REAL NOT NULL DEFAULT 0,
+  amount REAL NOT NULL DEFAULT 0,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(order_id) REFERENCES orders(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_order_items_order ON order_items(order_id);
 CREATE TABLE IF NOT EXISTS load_validations (
   id TEXT PRIMARY KEY,
   order_id TEXT NOT NULL,
@@ -589,6 +688,96 @@ async function createUser(request: Request, env: Env): Promise<Response> {
   return json({ ok: true, user: { id, name: body.name, email: body.email.toLowerCase(), role: body.role } }, 201);
 }
 
+
+async function listCustomers(request: Request, env: Env): Promise<Response> {
+  await requireRole(request, env, ['admin', 'coordinador', 'almacen']);
+  const url = new URL(request.url);
+  const q = (url.searchParams.get('q') || '').trim();
+  const params: any[] = [];
+  let where = '1=1';
+  if (q) {
+    where += ` AND (LOWER(c.company_name) LIKE ? OR LOWER(c.contact_name) LIKE ? OR LOWER(c.email) LIKE ? OR c.phone LIKE ? OR LOWER(c.delivery_address) LIKE ?)`;
+    const like = `%${q.toLowerCase()}%`;
+    params.push(like, like, like, `%${q.replace(/\D/g, '') || q}%`, like);
+  }
+
+  const rows = await env.DB.prepare(
+    `SELECT c.*,
+            COUNT(co.order_id) as total_orders,
+            MAX(o.updated_at) as last_order_at,
+            COALESCE(SUM(CASE WHEN o.status IN ('entregada','parcial') THEN o.packages_delivered ELSE 0 END),0) as packages_delivered
+     FROM customers c
+     LEFT JOIN customer_orders co ON co.customer_id = c.id
+     LEFT JOIN orders o ON o.id = co.order_id
+     WHERE ${where}
+     GROUP BY c.id
+     ORDER BY COALESCE(MAX(o.updated_at), c.updated_at) DESC
+     LIMIT 500`
+  ).bind(...params).all<CustomerRow>();
+
+  return json({ customers: rows.results || [] });
+}
+
+async function getCustomer(request: Request, env: Env): Promise<Response> {
+  await requireRole(request, env, ['admin', 'coordinador', 'almacen']);
+  const id = new URL(request.url).pathname.split('/')[3];
+  const customer = await env.DB.prepare(
+    `SELECT c.*,
+            COUNT(co.order_id) as total_orders,
+            MAX(o.updated_at) as last_order_at,
+            COALESCE(SUM(CASE WHEN o.status IN ('entregada','parcial') THEN o.packages_delivered ELSE 0 END),0) as packages_delivered
+     FROM customers c
+     LEFT JOIN customer_orders co ON co.customer_id = c.id
+     LEFT JOIN orders o ON o.id = co.order_id
+     WHERE c.id = ?
+     GROUP BY c.id`
+  ).bind(id).first<CustomerRow>();
+  if (!customer) return json({ error: 'Cliente no encontrado' }, 404);
+
+  const orders = await env.DB.prepare(
+    `SELECT o.*, r.name as route_name, u.name as driver_name
+     FROM customer_orders co
+     JOIN orders o ON o.id = co.order_id
+     LEFT JOIN routes r ON r.id = o.route_id
+     LEFT JOIN users u ON u.id = o.driver_id
+     WHERE co.customer_id = ?
+     ORDER BY COALESCE(o.scheduled_delivery_date, o.created_at) DESC
+     LIMIT 200`
+  ).bind(id).all<OrderRow>();
+
+  return json({ customer, orders: orders.results || [] });
+}
+
+async function extractOrderPdf(request: Request, env: Env): Promise<Response> {
+  const actor = await requireRole(request, env, ['admin', 'coordinador']);
+  const form = await request.formData();
+  const file = form.get('original_pdf');
+  if (!(file instanceof File) || file.size <= 0) return json({ error: 'Sube un PDF de orden Zoé para extraer datos.' }, 400);
+  if (!file.type.includes('pdf') && !file.name.toLowerCase().endsWith('.pdf')) return json({ error: 'El archivo debe ser PDF.' }, 400);
+
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const tempFolio = `import-${Date.now()}`;
+  const pdfKey = await putR2Bytes(env, `original-orders/${yearMonth()}/${safeName(file.name || tempFolio)}-${Date.now()}.pdf`, bytes, file.type || 'application/pdf');
+
+  const extractedText = extractTextFromPdfBytes(bytes);
+  const draft = parseZoeOrderText(extractedText);
+  const match = await findMatchingCustomer(env, draft);
+  const confidence = scoreExtractedDraft(draft, extractedText);
+
+  await audit(env, actor.id, 'extract_order_pdf', 'orders', null, JSON.stringify({ pdf_key: pdfKey, confidence }));
+  return json({
+    ok: true,
+    pdf_key: pdfKey,
+    draft,
+    customer_match: match,
+    confidence,
+    raw_text_preview: extractedText.slice(0, 2500),
+    notes: confidence < 50
+      ? 'No se detectó suficiente texto. Si el PDF está escaneado o viene como imagen, corrige los campos manualmente antes de guardar.'
+      : 'Datos extraídos. Revisa y corrige antes de guardar la orden.',
+  });
+}
+
 async function listRoutes(request: Request, env: Env): Promise<Response> {
   await requireUser(request, env);
   const rows = await env.DB.prepare(
@@ -644,8 +833,9 @@ async function listOrders(request: Request, env: Env): Promise<Response> {
   }
 
   const rows = await env.DB.prepare(
-    `SELECT o.*, r.name as route_name, u.name as driver_name
+    `SELECT o.*, co.customer_id as customer_id, r.name as route_name, u.name as driver_name
      FROM orders o
+     LEFT JOIN customer_orders co ON co.order_id = o.id
      LEFT JOIN routes r ON r.id = o.route_id
      LEFT JOIN users u ON u.id = o.driver_id
      WHERE ${where.join(' AND ')}
@@ -662,34 +852,58 @@ async function createOrder(request: Request, env: Env): Promise<Response> {
   const actor = await requireRole(request, env, ['admin', 'coordinador']);
   const form = await request.formData();
   const id = crypto.randomUUID();
-  const zoeFolio = requiredForm(form, 'zoe_folio');
+  const zoeFolio = requiredForm(form, 'zoe_folio').trim();
   const customerName = requiredForm(form, 'customer_name');
   const customerAddress = requiredForm(form, 'customer_address');
   const packagesExpected = toInt(form.get('packages_expected'), 0);
   if (packagesExpected < 1) throw new Error('packages_expected debe ser mayor a 0');
 
+  const duplicate = await env.DB.prepare('SELECT id FROM orders WHERE zoe_folio = ?').bind(zoeFolio).first<{ id: string }>();
+  if (duplicate?.id) return json({ error: 'Ya existe una orden registrada con este folio Zoé. Revisa la orden existente o usa un folio diferente.' }, 409);
+
+  const items = parseOrderItemsFromForm(form, packagesExpected);
+  const orderTotal = parseNumberOrNull(form.get('order_total')) ?? items.reduce((sum, item) => sum + item.amount, 0);
+
   const file = form.get('original_pdf');
-  let pdfKey: string | null = null;
+  let pdfKey: string | null = valueOrNull(form.get('original_pdf_key'));
   if (file instanceof File && file.size > 0) {
     pdfKey = await putR2(env, `original-orders/${yearMonth()}/${safeName(zoeFolio)}-${Date.now()}.pdf`, file, file.type || 'application/pdf');
   }
 
+  const customerId = await upsertCustomerFromOrder(env, {
+    company_name: valueOrNull(form.get('customer_company')),
+    contact_name: valueOrNull(form.get('customer_contact_name')) || customerName.trim(),
+    phone: valueOrNull(form.get('customer_phone')),
+    email: valueOrNull(form.get('customer_email')),
+    delivery_address: customerAddress.trim(),
+    delivery_references: valueOrNull(form.get('delivery_reference')),
+    notes: valueOrNull(form.get('notes')),
+  }, actor.id);
+
   const status: OrderStatus = form.get('route_id') || form.get('driver_id') ? 'programada' : 'pendiente_validacion';
-  await env.DB.prepare(
-    `INSERT INTO orders (
-      id, zoe_folio, order_date, scheduled_delivery_date, customer_name, customer_address,
-      customer_phone, packages_expected, status, route_id, driver_id, vehicle,
-      original_pdf_key, notes, created_by, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`
-  )
-    .bind(
+
+  const statements = [
+    env.DB.prepare(
+      `INSERT INTO orders (
+        id, zoe_folio, order_date, scheduled_delivery_date, customer_company, customer_name,
+        customer_contact_name, customer_email, customer_address, customer_phone, delivery_reference,
+        payment_note, order_total, packages_expected, status, route_id, driver_id, vehicle,
+        original_pdf_key, notes, created_by, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`
+    ).bind(
       id,
-      zoeFolio.trim(),
+      zoeFolio,
       valueOrNull(form.get('order_date')),
       valueOrNull(form.get('scheduled_delivery_date')),
+      valueOrNull(form.get('customer_company')),
       customerName.trim(),
+      valueOrNull(form.get('customer_contact_name')),
+      valueOrNull(form.get('customer_email')),
       customerAddress.trim(),
       valueOrNull(form.get('customer_phone')),
+      valueOrNull(form.get('delivery_reference')),
+      valueOrNull(form.get('payment_note')),
+      orderTotal,
       packagesExpected,
       status,
       valueOrNull(form.get('route_id')),
@@ -698,10 +912,20 @@ async function createOrder(request: Request, env: Env): Promise<Response> {
       pdfKey,
       valueOrNull(form.get('notes')),
       actor.id
-    )
-    .run();
+    ),
+    ...items.map((item, index) => env.DB.prepare(
+      'INSERT INTO order_items (id, order_id, quantity, description, unit_price, amount, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).bind(crypto.randomUUID(), id, item.quantity, item.description, item.unit_price, item.amount, index)),
+  ];
 
-  await audit(env, actor.id, 'create_order', 'orders', id, JSON.stringify({ zoe_folio: zoeFolio }));
+  if (customerId) {
+    statements.push(env.DB.prepare(
+      'INSERT OR REPLACE INTO customer_orders (id, customer_id, order_id) VALUES (COALESCE((SELECT id FROM customer_orders WHERE order_id = ?), ?), ?, ?)'
+    ).bind(id, crypto.randomUUID(), customerId, id));
+  }
+
+  await env.DB.batch(statements);
+  await audit(env, actor.id, 'create_order', 'orders', id, JSON.stringify({ zoe_folio: zoeFolio, items: items.length }));
   return json({ ok: true, order: await fetchOrder(env, id) }, 201);
 }
 
@@ -728,9 +952,15 @@ async function updateOrder(request: Request, env: Env): Promise<Response> {
   const allowed = [
     'order_date',
     'scheduled_delivery_date',
+    'customer_company',
     'customer_name',
+    'customer_contact_name',
+    'customer_email',
     'customer_address',
     'customer_phone',
+    'delivery_reference',
+    'payment_note',
+    'order_total',
     'packages_expected',
     'route_id',
     'driver_id',
@@ -1300,7 +1530,8 @@ async function getFile(request: Request, env: Env): Promise<Response> {
 async function requireUser(request: Request, env: Env): Promise<User> {
   const auth = request.headers.get('Authorization') || '';
   const bearer = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : '';
-  const token = bearer || getCookie(request, 'zoe_session');
+  const urlToken = new URL(request.url).searchParams.get('token') || '';
+  const token = bearer || urlToken || getCookie(request, 'zoe_session');
   if (!token) throw httpError('Sesión requerida', 401);
   const tokenHash = await sha256(token);
   const row = await env.DB.prepare(
@@ -1326,18 +1557,254 @@ function httpError(message: string, status: number): Error {
   return err;
 }
 
+function parseOrderItemsFromForm(form: FormData, packagesExpected: number): OrderItemRow[] {
+  const quantities = form.getAll('item_quantity');
+  const descriptions = form.getAll('item_description');
+  const unitPrices = form.getAll('item_unit_price');
+  const amounts = form.getAll('item_amount');
+  const items: OrderItemRow[] = [];
+
+  for (let i = 0; i < descriptions.length; i++) {
+    const description = valueOrNull(descriptions[i]) || 'Producto Zoé Water';
+    const quantity = toInt(quantities[i] || '0', 0);
+    const unitPrice = parseNumberOrNull(unitPrices[i] || '0') || 0;
+    const amount = parseNumberOrNull(amounts[i] || '0') ?? quantity * unitPrice;
+    if (quantity > 0 || description.trim()) {
+      items.push({
+        id: crypto.randomUUID(),
+        order_id: '',
+        quantity: quantity || 0,
+        description,
+        unit_price: unitPrice,
+        amount,
+        sort_order: i,
+      });
+    }
+  }
+
+  if (!items.length) {
+    items.push({
+      id: crypto.randomUUID(),
+      order_id: '',
+      quantity: packagesExpected,
+      description: 'Paquetes de producto Zoé Water',
+      unit_price: 0,
+      amount: 0,
+      sort_order: 0,
+    });
+  }
+
+  return items;
+}
+
 async function fetchOrder(env: Env, id: string): Promise<OrderRow | null> {
-  return await env.DB.prepare(
-    `SELECT o.*, r.name as route_name, u.name as driver_name
+  const order = await env.DB.prepare(
+    `SELECT o.*, co.customer_id as customer_id, r.name as route_name, u.name as driver_name
      FROM orders o
+     LEFT JOIN customer_orders co ON co.order_id = o.id
      LEFT JOIN routes r ON r.id = o.route_id
      LEFT JOIN users u ON u.id = o.driver_id
      WHERE o.id = ?`
   )
     .bind(id)
     .first<OrderRow>();
+  if (!order) return null;
+  try {
+    const items = await env.DB.prepare(
+      'SELECT id, order_id, quantity, description, unit_price, amount, sort_order FROM order_items WHERE order_id = ? ORDER BY sort_order ASC, created_at ASC'
+    ).bind(id).all<OrderItemRow>();
+    order.items = items.results || [];
+  } catch {
+    // Permite que la app siga leyendo órdenes viejas aunque aún no se aplique la migración 0004.
+    order.items = [];
+  }
+  return order;
 }
 
+
+
+async function upsertCustomerFromOrder(env: Env, data: Partial<CustomerRow>, userId: string | null): Promise<string | null> {
+  const contactName = cleanText(data.contact_name);
+  const companyName = cleanText(data.company_name);
+  const email = cleanEmail(data.email || null);
+  const phone = cleanPhone(data.phone || null);
+  const address = cleanText(data.delivery_address);
+  const refs = cleanText(data.delivery_references);
+  const notes = cleanText(data.notes);
+
+  if (!contactName && !companyName && !email && !phone && !address) return null;
+
+  const match = await findMatchingCustomer(env, {
+    customer_company: companyName || undefined,
+    customer_name: contactName || undefined,
+    customer_email: email || undefined,
+    customer_phone: phone || undefined,
+    customer_address: address || undefined,
+    delivery_reference: refs || undefined,
+  });
+
+  const id = match?.id || crypto.randomUUID();
+  if (match?.id) {
+    await env.DB.prepare(
+      `UPDATE customers
+       SET company_name = COALESCE(?, company_name),
+           contact_name = COALESCE(?, contact_name),
+           email = COALESCE(?, email),
+           phone = COALESCE(?, phone),
+           delivery_address = COALESCE(?, delivery_address),
+           delivery_references = COALESCE(?, delivery_references),
+           notes = COALESCE(?, notes),
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`
+    ).bind(companyName, contactName, email, phone, address, refs, notes, id).run();
+  } else {
+    await env.DB.prepare(
+      `INSERT INTO customers (id, company_name, contact_name, email, phone, delivery_address, delivery_references, notes, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(id, companyName, contactName, email, phone, address, refs, notes, userId).run();
+  }
+  return id;
+}
+
+async function findMatchingCustomer(env: Env, draft: ParsedOrderDraft): Promise<CustomerRow | null> {
+  const email = cleanEmail(draft.customer_email || null);
+  const phone = cleanPhone(draft.customer_phone || null);
+  const company = cleanText(draft.customer_company || null);
+  const name = cleanText(draft.customer_contact_name || draft.customer_name || null);
+
+  if (email) {
+    const row = await env.DB.prepare('SELECT * FROM customers WHERE LOWER(email) = LOWER(?) ORDER BY updated_at DESC LIMIT 1').bind(email).first<CustomerRow>();
+    if (row) return row;
+  }
+  if (phone) {
+    const row = await env.DB.prepare('SELECT * FROM customers WHERE phone = ? ORDER BY updated_at DESC LIMIT 1').bind(phone).first<CustomerRow>();
+    if (row) return row;
+  }
+  if (company && name) {
+    const row = await env.DB.prepare(
+      'SELECT * FROM customers WHERE LOWER(company_name) = LOWER(?) AND LOWER(contact_name) = LOWER(?) ORDER BY updated_at DESC LIMIT 1'
+    ).bind(company, name).first<CustomerRow>();
+    if (row) return row;
+  }
+  return null;
+}
+
+function extractTextFromPdfBytes(bytes: Uint8Array): string {
+  let binary = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.slice(i, i + chunk));
+  }
+
+  const pieces: string[] = [];
+  const literal = /\((?:\\.|[^\\()])*\)\s*Tj/g;
+  let m: RegExpExecArray | null;
+  while ((m = literal.exec(binary))) pieces.push(decodePdfLiteral(m[0].replace(/\s*Tj$/, '')));
+
+  const arrays = /\[((?:.|\n|\r)*?)\]\s*TJ/g;
+  while ((m = arrays.exec(binary))) {
+    const inner = m[1];
+    const literals = inner.match(/\((?:\\.|[^\\()])*\)/g) || [];
+    if (literals.length) pieces.push(literals.map(decodePdfLiteral).join(''));
+  }
+
+  // Fallback: algunas órdenes no exponen operadores Tj/TJ de forma clara.
+  // Este bloque rescata fragmentos legibles del PDF, aunque no sirve para OCR.
+  const readable = binary
+    .replace(/[\x00-\x08\x0E-\x1F\x7F-\xFF]+/g, ' ')
+    .match(/[A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9@#$.,:;()\/\- ]{4,}/g);
+  if (readable) pieces.push(...readable.slice(0, 500));
+
+  return pieces.join('\n').replace(/\s+/g, ' ').replace(/\s*(DIRECCIÓN|DIRECCION|REFERENCIAS|Empresa|Nombre|Principal|Correo|Cantidad|Descripción|Descripcion|Total|Pedido)\s*/gi, '\n$1 ')
+    .replace(/\n\s+/g, '\n').trim();
+}
+
+function decodePdfLiteral(raw: string): string {
+  let s = raw.trim();
+  if (s.startsWith('(') && s.endsWith(')')) s = s.slice(1, -1);
+  return s
+    .replace(/\\n/g, '\n')
+    .replace(/\\r/g, '\r')
+    .replace(/\\t/g, '\t')
+    .replace(/\\\(/g, '(')
+    .replace(/\\\)/g, ')')
+    .replace(/\\\\/g, '\\')
+    .trim();
+}
+
+function parseZoeOrderText(text: string): ParsedOrderDraft {
+  const t = text.replace(/\r/g, '\n').replace(/\n+/g, '\n');
+  const clean = t.replace(/\s+/g, ' ');
+  const draft: ParsedOrderDraft = {
+    payment_note: 'Contamos con tu pronto pago',
+    items: [],
+  };
+
+  draft.zoe_folio = firstMatch(clean, /Pedido\s*#\s*([A-Za-z0-9-]+)/i) || firstMatch(clean, /CC\s*-\s*Pedido\s*#\s*([A-Za-z0-9-]+)/i);
+  draft.customer_phone = cleanPhone(firstMatch(clean, /Principal\s*:?\s*([+()\d\s.-]{7,})/i)) || undefined;
+  draft.customer_email = cleanEmail(firstMatch(clean, /Correo\s*:?\s*([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})/i)) || undefined;
+  draft.customer_company = cleanText(firstMatch(clean, /Empresa\s*:?\s*(.+?)\s+Nombre\s*:/i)) || undefined;
+  draft.customer_name = cleanText(firstMatch(clean, /Nombre\s*:?\s*(.+?)\s+(?:Principal\s*:|Correo\s*:|DIRECCI[ÓO]N|Cantidad|REFERENCIAS)/i)) || undefined;
+  draft.customer_contact_name = draft.customer_name;
+
+  const address = firstMatch(clean, /DIRECCI[ÓO]N\s+DE\s+ENTREGA\s*(.+?)\s+REFERENCIAS/i)
+    || firstMatch(clean, /DIRECCI[ÓO]N\s+DE\s+ENTREGA\s*(.+?)\s+(?:Empresa\s*:|Cantidad|CC\s*-)/i);
+  draft.customer_address = cleanText(address) || undefined;
+
+  const refs = firstMatch(clean, /REFERENCIAS\s*(.+?)\s+(?:Empresa\s*:|Nombre\s*:|Cantidad|CC\s*-|Pedido\s*#)/i);
+  draft.delivery_reference = cleanText(refs) || undefined;
+
+  const items: OrderItemRow[] = [];
+  const itemRe = /(\d+)\s+(Paquete\(s\).*?Zo[ée].*?)(?:\s+\$?([\d,]+\.\d{2}))\s+\$?([\d,]+\.\d{2})/gi;
+  let m: RegExpExecArray | null;
+  while ((m = itemRe.exec(clean))) {
+    const quantity = Number(m[1]);
+    const unitPrice = parseMoney(m[3]);
+    const amount = parseMoney(m[4]);
+    items.push({ id: crypto.randomUUID(), order_id: '', quantity, description: m[2].trim(), unit_price: unitPrice, amount, sort_order: items.length });
+  }
+  if (items.length) draft.items = items;
+
+  const total = firstMatch(clean, /Total\s+\$?([\d,]+\.\d{2})/i);
+  draft.order_total = total ? parseMoney(total) : (items.length ? items.reduce((sum, item) => sum + item.amount, 0) : undefined);
+  draft.packages_expected = items.length ? items.reduce((sum, item) => sum + item.quantity, 0) : undefined;
+
+  return draft;
+}
+
+function scoreExtractedDraft(draft: ParsedOrderDraft, rawText: string): number {
+  let score = 0;
+  if (rawText.length > 300) score += 10;
+  if (draft.zoe_folio) score += 20;
+  if (draft.customer_name || draft.customer_company) score += 20;
+  if (draft.customer_phone || draft.customer_email) score += 15;
+  if (draft.customer_address) score += 20;
+  if (draft.items && draft.items.length) score += 15;
+  return Math.min(score, 100);
+}
+
+function firstMatch(text: string, regex: RegExp): string | undefined {
+  const m = regex.exec(text);
+  return m?.[1]?.trim();
+}
+
+function parseMoney(value: string | undefined): number {
+  if (!value) return 0;
+  const n = Number(value.replace(/[$,\s]/g, ''));
+  return Number.isFinite(n) ? n : 0;
+}
+
+function cleanEmail(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const match = value.trim().match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+  return match ? match[0].toLowerCase() : null;
+}
+
+function cleanPhone(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const digits = String(value).replace(/\D/g, '');
+  return digits.length >= 7 ? digits : null;
+}
 
 async function fetchVehicleChecklist(env: Env, id: string): Promise<VehicleChecklistRow | null> {
   return await env.DB.prepare(

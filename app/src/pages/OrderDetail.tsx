@@ -1,17 +1,20 @@
 import { useEffect, useState } from 'react';
 import { api, fileUrl } from '../api';
 import StatusBadge from '../components/StatusBadge';
-import { Order } from '../types';
+import ZoeProofDocument from '../components/ZoeProofDocument';
+import { DeliveryEvidence, Order } from '../types';
 
 export default function OrderDetail({ id }: { id: string }) {
   const [order, setOrder] = useState<Order | null>(null);
+  const [evidence, setEvidence] = useState<DeliveryEvidence | null>(null);
   const [error, setError] = useState('');
   const [reason, setReason] = useState('Corrección de evidencia');
 
   async function load() {
     try {
-      const res = await api.order(id);
+      const res: any = await api.order(id);
       setOrder(res.order);
+      setEvidence((res.evidence || [])[0] || null);
     } catch (e: any) { setError(e.message); }
   }
 
@@ -33,7 +36,7 @@ export default function OrderDetail({ id }: { id: string }) {
       <button className="link-button" onClick={() => location.hash = '#/orders'}>← Volver</button>
       <section className="card detail-card">
         <div className="detail-head">
-          <div><h2>{order.zoe_folio}</h2><p>{order.customer_name}</p></div>
+          <div><h2>{order.zoe_folio}</h2><p>{order.customer_company || order.customer_name}</p></div>
           <StatusBadge status={order.status} />
         </div>
         <div className="detail-grid">
@@ -47,8 +50,14 @@ export default function OrderDetail({ id }: { id: string }) {
         <div className="actions-row">
           {order.original_pdf_key && <a className="btn" href={fileUrl(order.original_pdf_key)} target="_blank">Ver PDF original</a>}
           {order.signed_pdf_key && <a className="btn" href={fileUrl(order.signed_pdf_key)} target="_blank">Ver evidencia PDF</a>}
+          <button className="btn" onClick={() => location.hash = `#/orders/${order.id}/proof`}>Ver prueba HTML</button>
           {(order.status === 'programada' || order.status === 'cargada') && <button className="btn primary" onClick={startRoute}>Mandar a ruta</button>}
         </div>
+      </section>
+
+      <section className="card proof-preview-card">
+        <div className="section-head-inline"><div><h3>Vista previa de prueba de entrega</h3><p>Formato reconstruido a partir de la orden Zoé.</p></div></div>
+        <ZoeProofDocument order={order} evidence={evidence} compact />
       </section>
 
       <section className="card">

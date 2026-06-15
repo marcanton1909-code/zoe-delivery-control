@@ -6,12 +6,14 @@ import Dashboard from './pages/Dashboard';
 import Orders from './pages/Orders';
 import NewOrder from './pages/NewOrder';
 import OrderDetail from './pages/OrderDetail';
+import ProofOfDelivery from './pages/ProofOfDelivery';
 import Warehouse from './pages/Warehouse';
 import Driver from './pages/Driver';
 import DriverOrder from './pages/DriverOrder';
 import Reports from './pages/Reports';
 import VehicleChecklist from './pages/VehicleChecklist';
 import Inventory from './pages/Inventory';
+import Customers from './pages/Customers';
 import Settings from './pages/Settings';
 
 function getHash() {
@@ -24,6 +26,7 @@ const iconMap: Record<string, string> = {
   Almacén: '▣',
   'Bitácora vehículo': '◉',
   Inventarios: '▤',
+  Clientes: '◎',
   Repartidor: '↗',
   Reportes: '◌',
   'Config.': '⚙',
@@ -61,6 +64,7 @@ export default function App() {
       { href: '#/warehouse', label: 'Almacén', roles: ['admin','coordinador','almacen'] },
       { href: '#/vehicle-checklist', label: 'Bitácora vehículo', roles: ['admin','coordinador','almacen','repartidor'] },
       { href: '#/inventory', label: 'Inventarios', roles: ['admin','coordinador','almacen'] },
+      { href: '#/customers', label: 'Clientes', roles: ['admin','coordinador','almacen'] },
       { href: '#/driver', label: 'Repartidor', roles: ['admin','coordinador','repartidor'] },
       { href: '#/reports', label: 'Reportes', roles: ['admin','coordinador'] },
       { href: '#/settings', label: 'Config.', roles: ['admin'] },
@@ -80,11 +84,13 @@ export default function App() {
   let page = <Dashboard />;
   if (route === '/orders') page = <Orders onOpen={(id) => (location.hash = `#/orders/${id}`)} />;
   if (route === '/orders/new') page = <NewOrder />;
-  if (route.startsWith('/orders/') && route !== '/orders/new') page = <OrderDetail id={route.split('/')[2]} />;
+  if (route.startsWith('/orders/') && route.endsWith('/proof')) page = <ProofOfDelivery id={route.split('/')[2]} />;
+  else if (route.startsWith('/orders/') && route !== '/orders/new') page = <OrderDetail id={route.split('/')[2]} />;
   if (route === '/warehouse') page = <Warehouse />;
   if (route === '/driver') page = <Driver />;
   if (route === '/vehicle-checklist') page = <VehicleChecklist />;
   if (route === '/inventory') page = <Inventory />;
+  if (route === '/customers') page = <Customers />;
   if (route.startsWith('/driver/orders/')) page = <DriverOrder id={route.split('/')[3]} />;
   if (route === '/reports') page = <Reports />;
   if (route === '/settings') page = <Settings />;
