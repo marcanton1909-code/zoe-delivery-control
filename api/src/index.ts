@@ -1701,8 +1701,16 @@ async function extractTextFromPdfBytes(bytes: Uint8Array): Promise<string> {
   try {
     const streams = await readPdfStreams(binary);
     const fontMaps = await buildFontUnicodeMaps(binary, streams);
+
+    // Extractor específico para los PDFs reales de Zoé: cada letra viene como <0001> Tj
+    // y se debe traducir con /ToUnicode por fuente (/F11, /F12, /F13).
+    // Este método respeta los cambios de línea por coordenadas y evita el texto corrupto
+    // tipo "Olinc{a" o "boniente" que aparece cuando no se aplica el CMap.
+    const zoeText = extractZoePositionedTextFromContentStreams(streams, fontMaps);
+    if (zoeText.trim()) pieces.unshift(zoeText);
+
     const contentText = extractTextFromContentStreams(streams, fontMaps);
-    if (contentText.trim()) pieces.unshift(contentText);
+    if (contentText.trim() && contentText.trim() !== zoeText.trim()) pieces.push(contentText);
   } catch (err: any) {
     pieces.push(`PDF_TEXT_EXTRACT_WARNING ${err?.message || String(err)}`);
   }
@@ -1878,6 +1886,87 @@ function unicodeHexToString(hex: string): string {
   return String.fromCharCode(...codes).replace(/\u0000/g, '');
 }
 
+
+function extractZoePositionedTextFromContentStreams(streams: PdfStreamInfo[], fontMaps: Record<string, Record<string, string>>): string {
+  const lines: string[] = [];
+
+  for (const stream of streams) {
+    const content = stream.decoded;
+    if (!/\bBT\b/.test(content) || !/(\bTj\b|\bTJ\b)/.test(content)) continue;
+
+    let currentFont = '';
+    let currentLine = '';
+    let sawText = false;
+
+    const flushLine = () => {
+      const line = currentLine.replace(/\t+/g, ' ').replace(/ {2,}/g, ' ').trim();
+      if (line) lines.push(line);
+      currentLine = '';
+    };
+
+    // Los PDFs de Zoé no usan texto corrido; posicionan casi cada glifo con "Td <000X> Tj".
+    // Por eso aquí leemos secuencialmente: fuente, desplazamiento, hex/literal y fin de texto.
+    const tokenRe = /\/(F\d+)\s+[\d.]+\s+Tf|<([0-9A-Fa-f\s]+)>\s*Tj|\[(.*?)\]\s*TJ|\((?:\\.|[^\\()])*\)\s*Tj|(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s+Td|\bT\*\b|\bET\b/gs;
+    let m: RegExpExecArray | null;
+
+    while ((m = tokenRe.exec(content))) {
+      if (m[1]) {
+        currentFont = m[1];
+        continue;
+      }
+
+      if (m[4] !== undefined && m[5] !== undefined) {
+        const x = Number(m[4]);
+        const y = Number(m[5]);
+        if (sawText && Math.abs(y) > 0.1) flushLine();
+        // Algunos textos separados en columnas tienen saltos grandes en X dentro de la misma línea.
+        if (sawText && Math.abs(y) <= 0.1 && x > 18 && currentLine && !currentLine.endsWith(' ')) currentLine += ' ';
+        continue;
+      }
+
+      if (m[2]) {
+        currentLine += decodePdfHexText(m[2], fontMaps[currentFont]);
+        sawText = true;
+        continue;
+      }
+
+      if (m[3]) {
+        const parts = [...m[3].matchAll(/<([0-9A-Fa-f\s]+)>|\((?:\\.|[^\\()])*\)/g)].map(part => {
+          if (part[1]) return decodePdfHexText(part[1], fontMaps[currentFont]);
+          return decodePdfLiteral(part[0]);
+        });
+        currentLine += parts.join('');
+        sawText = true;
+        continue;
+      }
+
+      if (m[0].endsWith('Tj') && m[0].trim().startsWith('(')) {
+        currentLine += decodePdfLiteral(m[0].replace(/\s*Tj$/, ''));
+        sawText = true;
+        continue;
+      }
+
+      if (m[0] === 'T*' || m[0] === 'ET') {
+        if (sawText) flushLine();
+        sawText = false;
+      }
+    }
+
+    flushLine();
+  }
+
+  // El PDF de Zoé trae dos copias de la orden en una sola página. Quitamos líneas duplicadas consecutivas
+  // para evitar que el parser capture datos repetidos.
+  const compact: string[] = [];
+  for (const line of lines) {
+    const normalized = line.toLowerCase();
+    const alreadySeenNearby = compact.slice(-80).some(prev => prev.toLowerCase() === normalized);
+    if (!alreadySeenNearby) compact.push(line);
+  }
+
+  return compact.join('\n');
+}
+
 function extractTextFromContentStreams(streams: PdfStreamInfo[], fontMaps: Record<string, Record<string, string>>): string {
   const pieces: string[] = [];
   for (const stream of streams) {
@@ -1983,8 +2072,12 @@ function decodePdfLiteral(raw: string): string {
 }
 
 function parseZoeOrderText(text: string): ParsedOrderDraft {
-  const t = text.replace(/\r/g, '\n').replace(/\n+/g, '\n');
-  const clean = t.replace(/\s+/g, ' ');
+  const normalizedText = text.replace(/\r/g, '\n').replace(/\t+/g, ' ');
+  const lines = normalizedText
+    .split('\n')
+    .map(l => cleanText(l) || '')
+    .filter(Boolean);
+  const clean = lines.join(' ');
   const draft: ParsedOrderDraft = {
     payment_note: 'Contamos con tu pronto pago',
     items: [],
@@ -1994,22 +2087,104 @@ function parseZoeOrderText(text: string): ParsedOrderDraft {
     || firstMatch(clean, /Pedido\s*#\s*([A-Za-z0-9-]+)/i);
 
   draft.customer_email = cleanEmail(firstMatch(clean, /Correo\s*:?\s*([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})/i)) || undefined;
-  draft.customer_company = cleanText(firstMatch(clean, /Empresa\s*:?\s*(.+?)\s+Nombre\s*:/i)) || undefined;
-  draft.customer_name = cleanText(firstMatch(clean, /Nombre\s*:?\s*(.+?)\s+(?:Principal\s*:|Correo\s*:|DIRECCI[ÓO]N|Cantidad|REFERENCIAS|(?:RP|CC)?\s*-?\s*Pedido)/i)) || undefined;
+  draft.customer_company = extractValueAfterLabel(lines, 'Empresa')
+    || cleanText(firstMatch(clean, /Empresa\s*:?\s*(.+?)\s+Nombre\s*:/i))
+    || undefined;
+  draft.customer_name = extractValueAfterLabel(lines, 'Nombre')
+    || cleanText(firstMatch(clean, /Nombre\s*:?\s*(.+?)\s+(?:Principal\s*:|Correo\s*:|DIRECCI[ÓO]N|Cantidad|REFERENCIAS|(?:RP|CC)?\s*-?\s*Pedido)/i))
+    || undefined;
   draft.customer_contact_name = draft.customer_name;
 
   const phoneFromPrincipal = cleanPhone(firstMatch(clean, /Principal\s*:?\s*([+()\d\s.-]{7,})/i));
   const phoneFromNotes = cleanPhone(firstMatch(clean, /(?:tel|cel|contacto)\s*:?\s*([+()\d\s.-]{7,}(?:\s*(?:cel|tel)\s*:?\s*[+()\d\s.-]{7,})?)/i));
   draft.customer_phone = phoneFromPrincipal || phoneFromNotes || undefined;
 
-  const address = firstMatch(clean, /DIRECCI[ÓO]N\s+DE\s+ENTREGA\s*(.+?)\s+(?:REFERENCIAS|NOTAS|Cantidad\s+Descripci[óo]n)/i)
-    || firstMatch(clean, /DIRECCI[ÓO]N\s+DE\s+ENTREGA\s*(.+?)\s+(?:Empresa\s*:|Cantidad|(?:RP|CC)?\s*-?\s*Pedido)/i);
+  const addressLines = extractBlockLines(lines, /DIRECCI[ÓO]N\s+DE\s+ENTREGA/i, [/^REFERENCIAS$/i, /^NOTAS$/i, /^Cantidad$/i, /^Empresa\s*:/i, /Pedido\s*#/i]);
+  const address = addressLines.join(' ') || firstMatch(clean, /DIRECCI[ÓO]N\s+DE\s+ENTREGA\s*(.+?)\s+(?:REFERENCIAS|NOTAS|Cantidad\s+Descripci[óo]n)/i);
   draft.customer_address = cleanText(address) || undefined;
 
-  const refs = firstMatch(clean, /REFERENCIAS\s*(.+?)\s+(?:Cantidad\s+Descripci[óo]n|Empresa\s*:|Nombre\s*:|(?:RP|CC)?\s*-?\s*Pedido\s*#)/i)
+  const referenceLines = extractBlockLines(lines, /^REFERENCIAS$/i, [/^NOTAS$/i, /^Cantidad$/i, /^Empresa\s*:/i, /Pedido\s*#/i]);
+  const notesLines = extractBlockLines(lines, /^NOTAS$/i, [/^Cantidad$/i, /^Descripción$/i, /^Precio\s*x\s*unidad$/i, /^Importe$/i, /^Empresa\s*:/i, /Pedido\s*#/i]);
+  const refs = (referenceLines.length ? referenceLines.join(' ') : notesLines.join(' '))
     || firstMatch(clean, /NOTAS\s*(.+?)\s+(?:Cantidad\s+Descripci[óo]n|Total\s+\$)/i);
-  draft.delivery_reference = cleanText((refs || '').replace(/^NOTAS\s*/i, '')) || undefined;
+  draft.delivery_reference = cleanText(refs) || undefined;
 
+  let items = parseItemsFromZoeLines(lines);
+  if (!items.length) items = parseItemsFromFlattenedZoeText(clean);
+  draft.items = items;
+
+  const total = firstMatch(clean, /Total\s+\$?([\d,]+\.\d{2})/i);
+  draft.order_total = total ? parseMoney(total) : (items.length ? items.reduce((sum, item) => sum + item.amount, 0) : undefined);
+  draft.packages_expected = items.length ? items.reduce((sum, item) => sum + item.quantity, 0) : undefined;
+
+  return draft;
+}
+
+function extractValueAfterLabel(lines: string[], label: string): string | undefined {
+  const labelRe = new RegExp(`^${escapeRegExp(label)}\\s*:?\\s*(.*)$`, 'i');
+  for (let i = 0; i < lines.length; i++) {
+    const m = labelRe.exec(lines[i]);
+    if (!m) continue;
+    const inline = cleanText(m[1]);
+    if (inline) return inline;
+    const next = cleanText(lines[i + 1]);
+    if (next && !isZoeSectionHeader(next)) return next;
+  }
+  return undefined;
+}
+
+function isZoeSectionHeader(value: string): boolean {
+  return /^(Empresa|Nombre|Principal|Correo|DIRECCI[ÓO]N DE ENTREGA|REFERENCIAS|NOTAS|Cantidad|Descripción|Precio x unidad|Importe|Total)$/i.test(value.trim())
+    || /Pedido\s*#/i.test(value);
+}
+
+function extractBlockLines(lines: string[], startRe: RegExp, stopRes: RegExp[]): string[] {
+  const start = lines.findIndex(line => startRe.test(line));
+  if (start < 0) return [];
+  const out: string[] = [];
+  for (let i = start + 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (stopRes.some(re => re.test(line))) break;
+    if (!line || /^[_\- ]+$/.test(line)) continue;
+    out.push(line);
+  }
+  return out;
+}
+
+function parseItemsFromZoeLines(lines: string[]): OrderItemRow[] {
+  const items: OrderItemRow[] = [];
+  const seen = new Set<string>();
+  const start = lines.findIndex(line => /^Cantidad$/i.test(line));
+  if (start < 0) return items;
+
+  let i = start + 1;
+  while (i < lines.length && /^(Descripción|Descripcion|Precio\s*x\s*unidad|Importe)$/i.test(lines[i])) i++;
+
+  while (i < lines.length) {
+    const line = lines[i];
+    if (/^Total$/i.test(line) || /^Recibí/i.test(line) || /^Si tienes/i.test(line) || /Pedido\s*#/i.test(line)) break;
+    if (!/^\d+(?:\.\d+)?$/.test(line)) { i++; continue; }
+
+    const quantity = Number(line);
+    const description = cleanText(lines[i + 1]) || '';
+    const unit = lines[i + 2] || '';
+    const amountValue = lines[i + 3] || '';
+
+    if (!description || !isMoneyText(unit) || !isMoneyText(amountValue)) { i++; continue; }
+
+    const unitPrice = parseMoney(unit);
+    const amount = parseMoney(amountValue);
+    const signature = `${quantity}|${description}|${unitPrice}|${amount}`.toLowerCase();
+    if (!seen.has(signature)) {
+      seen.add(signature);
+      items.push({ id: crypto.randomUUID(), order_id: '', quantity, description, unit_price: unitPrice, amount, sort_order: items.length });
+    }
+    i += 4;
+  }
+  return items;
+}
+
+function parseItemsFromFlattenedZoeText(clean: string): OrderItemRow[] {
   const items: OrderItemRow[] = [];
   const section = firstMatch(clean, /Cantidad\s+Descripci[óo]n\s+Precio\s*x\s*unidad\s+Importe\s+(.+?)\s+Total\s+\$?[\d,]+\.\d{2}/i)
     || firstMatch(clean, /Cantidad\s+Descripci[óo]n\s+(.+?)\s+Total\s+\$?[\d,]+\.\d{2}/i)
@@ -2028,13 +2203,11 @@ function parseZoeOrderText(text: string): ParsedOrderDraft {
     seenItems.add(signature);
     items.push({ id: crypto.randomUUID(), order_id: '', quantity, description, unit_price: unitPrice, amount, sort_order: items.length });
   }
-  if (items.length) draft.items = items;
+  return items;
+}
 
-  const total = firstMatch(clean, /Total\s+\$?([\d,]+\.\d{2})/i);
-  draft.order_total = total ? parseMoney(total) : (items.length ? items.reduce((sum, item) => sum + item.amount, 0) : undefined);
-  draft.packages_expected = items.length ? items.reduce((sum, item) => sum + item.quantity, 0) : undefined;
-
-  return draft;
+function isMoneyText(value: string | undefined): boolean {
+  return /^\$?\s*[\d,]+\.\d{2}$/.test(String(value || '').trim());
 }
 
 function scoreExtractedDraft(draft: ParsedOrderDraft, rawText: string): number {
