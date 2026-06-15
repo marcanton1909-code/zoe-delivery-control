@@ -80,7 +80,7 @@ export default function DriverOrder({ id }: { id: string }) {
 
         <ZoeProofDocument
           order={order}
-          receiverNameNode={<input className="zoe-inline-input" name="receiver_name" placeholder="Nombre de quien recibe" />}
+          receiverNameNode={<input className="zoe-inline-input" name="receiver_name" placeholder="Nombre de quien recibe (opcional)" />}
           dateNode={<strong>{new Date().toLocaleDateString('es-MX')}</strong>}
           signatureNode={<SignatureBox onChange={setSignature} />}
         />

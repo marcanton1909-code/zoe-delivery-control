@@ -1064,7 +1064,6 @@ async function deliverOrder(request: Request, env: Env): Promise<Response> {
   const receiverName = valueOrNull(form.get('receiver_name'));
 
   if (deliveryResult === 'completa' || deliveryResult === 'parcial') {
-    if (!receiverName) return json({ error: 'El nombre de quien recibe es obligatorio' }, 400);
     if (packagesDelivered < 1) return json({ error: 'Paquetes entregados debe ser mayor a 0' }, 400);
   }
   if (deliveryResult === 'parcial' && !comments) return json({ error: 'En entrega parcial el comentario es obligatorio' }, 400);
