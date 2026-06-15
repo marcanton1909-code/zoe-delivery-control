@@ -4,7 +4,7 @@ import Field from '../components/Field';
 
 export default function Login({ onLoggedIn }: { onLoggedIn: () => void }) {
   const [email, setEmail] = useState('marco.cruz@mackavi.com');
-  const [password, setPassword] = useState('Admin1234!');
+  const [password, setPassword] = useState('Admin1234');
   const [name, setName] = useState('Marco Cruz');
   const [error, setError] = useState('');
   const [ok, setOk] = useState('');
@@ -24,7 +24,7 @@ export default function Login({ onLoggedIn }: { onLoggedIn: () => void }) {
   async function repairAdmin() {
     setLoading(true); setError(''); setOk('');
     try {
-      await api.setup({ name: name || 'Marco Cruz', email: email || 'marco.cruz@mackavi.com', password: password || 'Admin1234!' });
+      await api.setup({ name: name || 'Marco Cruz', email: email || 'marco.cruz@mackavi.com', password: password || 'Admin1234' });
       setOk('Administrador creado/reparado. Entrando al sistema...');
       onLoggedIn();
     } catch (err: any) {

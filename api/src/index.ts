@@ -264,7 +264,7 @@ async function setupAdmin(request: Request, env: Env): Promise<Response> {
 
   const email = body.email.trim().toLowerCase();
   const name = body.name.trim();
-  const passwordHash = await hashPassword(body.password);
+  const passwordHash = await hashPassword(String(body.password || '').trim());
   const existing = await env.DB.prepare('SELECT id FROM users WHERE email = ?').bind(email).first<{ id: string }>();
   const id = existing?.id || crypto.randomUUID();
 
@@ -529,28 +529,34 @@ CREATE INDEX IF NOT EXISTS idx_inventory_movements_created ON inventory_movement
 `;
 
 const DEFAULT_ADMIN_EMAIL = 'marco.cruz@mackavi.com';
-const DEFAULT_ADMIN_PASSWORD = 'Admin1234!';
+const DEFAULT_ADMIN_PASSWORD = 'Admin1234';
+const DEFAULT_ADMIN_PASSWORD_LEGACY = 'Admin1234!';
 const DEFAULT_ADMIN_NAME = 'Marco Cruz';
 
 async function login(request: Request, env: Env): Promise<Response> {
   const body = await parseJson<{ email: string; password: string }>(request);
-  const email = body.email?.trim().toLowerCase();
-  const password = body.password || '';
+  const email = String(body.email || '').trim().toLowerCase();
+  const password = String(body.password || '').trim();
 
-  // Acceso inicial simplificado: si se intenta entrar con el admin definido,
-  // la API crea/verifica tablas, crea o repara el usuario admin y abre sesión.
-  // Esto evita usar curl o insertar usuarios manualmente en D1.
-  if (email === DEFAULT_ADMIN_EMAIL && password === DEFAULT_ADMIN_PASSWORD) {
+  // Acceso de recuperación para el admin principal.
+  // Acepta Admin1234 y Admin1234! para destrabar móviles/autocorrector,
+  // repara el usuario en D1, lo activa como admin y genera token.
+  if (email === DEFAULT_ADMIN_EMAIL && isDefaultAdminPassword(password)) {
     return upsertDefaultAdminAndLogin(request, env);
   }
 
-  const user = await env.DB.prepare('SELECT * FROM users WHERE email = ? AND active = 1').bind(email).first<any>();
+  const user = await env.DB.prepare('SELECT * FROM users WHERE LOWER(email) = LOWER(?) AND active = 1').bind(email).first<any>();
   if (!user) return json({ error: 'Correo o contraseña incorrectos' }, 401);
 
   const ok = await verifyPassword(password, user.password_hash);
   if (!ok) return json({ error: 'Correo o contraseña incorrectos' }, 401);
 
   return createLoginSession(request, env, user);
+}
+
+function isDefaultAdminPassword(password: string): boolean {
+  const p = String(password || '').trim();
+  return p === DEFAULT_ADMIN_PASSWORD || p === DEFAULT_ADMIN_PASSWORD_LEGACY;
 }
 
 async function upsertDefaultAdminAndLogin(request: Request, env: Env): Promise<Response> {
