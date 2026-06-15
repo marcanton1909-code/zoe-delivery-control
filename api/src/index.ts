@@ -759,7 +759,7 @@ async function extractOrderPdf(request: Request, env: Env): Promise<Response> {
   const tempFolio = `import-${Date.now()}`;
   const pdfKey = await putR2Bytes(env, `original-orders/${yearMonth()}/${safeName(file.name || tempFolio)}-${Date.now()}.pdf`, bytes, file.type || 'application/pdf');
 
-  const extractedText = extractTextFromPdfBytes(bytes);
+  const extractedText = await extractTextFromPdfBytes(bytes);
   const draft = parseZoeOrderText(extractedText);
   const match = await findMatchingCustomer(env, draft);
   const confidence = scoreExtractedDraft(draft, extractedText);
@@ -1689,13 +1689,47 @@ async function findMatchingCustomer(env: Env, draft: ParsedOrderDraft): Promise<
   return null;
 }
 
-function extractTextFromPdfBytes(bytes: Uint8Array): string {
-  let binary = '';
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) {
-    binary += String.fromCharCode(...bytes.slice(i, i + chunk));
+async function extractTextFromPdfBytes(bytes: Uint8Array): Promise<string> {
+  const binary = bytesToBinary(bytes);
+  const pieces: string[] = [];
+
+  // 1) Método anterior: PDFs sencillos con texto literal sin compresión.
+  pieces.push(...extractPlainPdfText(binary));
+
+  // 2) Método robusto para los PDFs reales de Zoé: streams FlateDecode + fuentes Identity-H + ToUnicode.
+  // El archivo que descarga Zoé usa texto como <0001> Tj dentro de streams comprimidos, por eso no aparecía texto.
+  try {
+    const streams = await readPdfStreams(binary);
+    const fontMaps = await buildFontUnicodeMaps(binary, streams);
+    const contentText = extractTextFromContentStreams(streams, fontMaps);
+    if (contentText.trim()) pieces.unshift(contentText);
+  } catch (err: any) {
+    pieces.push(`PDF_TEXT_EXTRACT_WARNING ${err?.message || String(err)}`);
   }
 
+  // 3) Fallback: rescata fragmentos legibles no comprimidos. No es OCR, solo respaldo.
+  const readable = binary
+    .replace(/[\x00-\x08\x0E-\x1F\x7F-\xFF]+/g, ' ')
+    .match(/[A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9@#$.,:;()\/\- ]{4,}/g);
+  if (readable) pieces.push(...readable.slice(0, 500));
+
+  return normalizeExtractedPdfText(pieces.join('\n'));
+}
+
+function bytesToBinary(bytes: Uint8Array): string {
+  let binary = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) binary += String.fromCharCode(...bytes.slice(i, i + chunk));
+  return binary;
+}
+
+function binaryToBytes(binary: string): Uint8Array {
+  const out = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i) & 0xff;
+  return out;
+}
+
+function extractPlainPdfText(binary: string): string[] {
   const pieces: string[] = [];
   const literal = /\((?:\\.|[^\\()])*\)\s*Tj/g;
   let m: RegExpExecArray | null;
@@ -1707,16 +1741,212 @@ function extractTextFromPdfBytes(bytes: Uint8Array): string {
     const literals = inner.match(/\((?:\\.|[^\\()])*\)/g) || [];
     if (literals.length) pieces.push(literals.map(decodePdfLiteral).join(''));
   }
+  return pieces;
+}
 
-  // Fallback: algunas órdenes no exponen operadores Tj/TJ de forma clara.
-  // Este bloque rescata fragmentos legibles del PDF, aunque no sirve para OCR.
-  const readable = binary
-    .replace(/[\x00-\x08\x0E-\x1F\x7F-\xFF]+/g, ' ')
-    .match(/[A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9@#$.,:;()\/\- ]{4,}/g);
-  if (readable) pieces.push(...readable.slice(0, 500));
+type PdfStreamInfo = {
+  objectId: number;
+  dictionary: string;
+  raw: string;
+  decoded: string;
+  isFlate: boolean;
+};
 
-  return pieces.join('\n').replace(/\s+/g, ' ').replace(/\s*(DIRECCIÓN|DIRECCION|REFERENCIAS|Empresa|Nombre|Principal|Correo|Cantidad|Descripción|Descripcion|Total|Pedido)\s*/gi, '\n$1 ')
-    .replace(/\n\s+/g, '\n').trim();
+async function readPdfStreams(binary: string): Promise<PdfStreamInfo[]> {
+  const streams: PdfStreamInfo[] = [];
+  const re = /(\d+)\s+0\s+obj\s*([\s\S]*?)stream\r?\n([\s\S]*?)\r?\nendstream/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(binary))) {
+    const objectId = Number(m[1]);
+    const dictionary = m[2] || '';
+    const raw = m[3] || '';
+    const isFlate = /\/FlateDecode\b/.test(dictionary);
+    let decoded = raw;
+    if (isFlate) {
+      const inflated = await inflatePdfData(binaryToBytes(raw));
+      if (inflated) decoded = bytesToBinary(inflated);
+    }
+    streams.push({ objectId, dictionary, raw, decoded, isFlate });
+  }
+  return streams;
+}
+
+async function inflatePdfData(data: Uint8Array): Promise<Uint8Array | null> {
+  const DS = (globalThis as any).DecompressionStream;
+  if (!DS) return null;
+  const formats = ['deflate', 'deflate-raw'] as const;
+  for (const format of formats) {
+    try {
+      const stream = new Blob([data]).stream().pipeThrough(new DS(format));
+      const buffer = await new Response(stream).arrayBuffer();
+      return new Uint8Array(buffer);
+    } catch {
+      // intenta con el siguiente formato
+    }
+  }
+  return null;
+}
+
+async function buildFontUnicodeMaps(binary: string, streams: PdfStreamInfo[]): Promise<Record<string, Record<string, string>>> {
+  const fontResourceToObj: Record<string, string> = {};
+  const resourceRe = /\/(F\d+)\s+(\d+)\s+0\s+R/g;
+  let m: RegExpExecArray | null;
+  while ((m = resourceRe.exec(binary))) fontResourceToObj[m[1]] = m[2];
+
+  const streamByObj = new Map<number, PdfStreamInfo>();
+  for (const stream of streams) streamByObj.set(stream.objectId, stream);
+
+  const fontMaps: Record<string, Record<string, string>> = {};
+  for (const [fontName, objId] of Object.entries(fontResourceToObj)) {
+    const fontObjRe = new RegExp(`${escapeRegExp(objId)}\\s+0\\s+obj([\\s\\S]*?)endobj`);
+    const fontObj = fontObjRe.exec(binary)?.[1] || '';
+    const toUnicodeId = firstMatch(fontObj, /\/ToUnicode\s+(\d+)\s+0\s+R/);
+    if (!toUnicodeId) continue;
+    const cmapStream = streamByObj.get(Number(toUnicodeId));
+    if (!cmapStream) continue;
+    fontMaps[fontName] = parseToUnicodeCMap(cmapStream.decoded);
+  }
+  return fontMaps;
+}
+
+function parseToUnicodeCMap(cmap: string): Record<string, string> {
+  const map: Record<string, string> = {};
+
+  const bfcharBlocks = cmap.match(/beginbfchar[\s\S]*?endbfchar/g) || [];
+  for (const block of bfcharBlocks) {
+    const pairRe = /<([0-9A-Fa-f]+)>\s+<([0-9A-Fa-f]+)>/g;
+    let m: RegExpExecArray | null;
+    while ((m = pairRe.exec(block))) map[m[1].toUpperCase()] = unicodeHexToString(m[2]);
+  }
+
+  const bfrangeBlocks = cmap.match(/beginbfrange[\s\S]*?endbfrange/g) || [];
+  for (const block of bfrangeBlocks) {
+    const rangeArrayRe = /<([0-9A-Fa-f]+)>\s+<([0-9A-Fa-f]+)>\s+\[([\s\S]*?)\]/g;
+    let m: RegExpExecArray | null;
+    while ((m = rangeArrayRe.exec(block))) {
+      const start = parseInt(m[1], 16);
+      const end = parseInt(m[2], 16);
+      const width = m[1].length;
+      const values = [...m[3].matchAll(/<([0-9A-Fa-f]+)>/g)].map(v => unicodeHexToString(v[1]));
+      for (let code = start; code <= end && code - start < values.length; code++) {
+        map[code.toString(16).toUpperCase().padStart(width, '0')] = values[code - start];
+      }
+    }
+
+    const rangeSequentialRe = /<([0-9A-Fa-f]+)>\s+<([0-9A-Fa-f]+)>\s+<([0-9A-Fa-f]+)>/g;
+    while ((m = rangeSequentialRe.exec(block))) {
+      const start = parseInt(m[1], 16);
+      const end = parseInt(m[2], 16);
+      const dest = parseInt(m[3], 16);
+      const width = m[1].length;
+      for (let code = start; code <= end; code++) {
+        map[code.toString(16).toUpperCase().padStart(width, '0')] = unicodeHexToString((dest + (code - start)).toString(16).padStart(m[3].length, '0'));
+      }
+    }
+  }
+
+  return map;
+}
+
+function unicodeHexToString(hex: string): string {
+  const clean = hex.replace(/\s+/g, '');
+  const codes: number[] = [];
+  for (let i = 0; i < clean.length; i += 4) {
+    const part = clean.slice(i, i + 4);
+    if (part.length === 4) codes.push(parseInt(part, 16));
+  }
+  return String.fromCharCode(...codes).replace(/\u0000/g, '');
+}
+
+function extractTextFromContentStreams(streams: PdfStreamInfo[], fontMaps: Record<string, Record<string, string>>): string {
+  const pieces: string[] = [];
+  for (const stream of streams) {
+    const content = stream.decoded;
+    if (!/\bBT\b/.test(content) || !/(\bTj\b|\bTJ\b)/.test(content)) continue;
+    const text = decodePdfContentText(content, fontMaps);
+    if (text.trim()) pieces.push(text);
+  }
+  return pieces.join('\n');
+}
+
+function decodePdfContentText(content: string, fontMaps: Record<string, Record<string, string>>): string {
+  let currentFont = '';
+  const out: string[] = [];
+  const tokenRe = /\/(F\d+)\s+[\d.]+\s+Tf|<([0-9A-Fa-f\s]+)>\s*Tj|\[(.*?)\]\s*TJ|\((?:\\.|[^\\()])*\)\s*Tj|(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s+Td|\bT\*\b|\bET\b/gs;
+  let m: RegExpExecArray | null;
+  while ((m = tokenRe.exec(content))) {
+    if (m[1]) {
+      currentFont = m[1];
+      continue;
+    }
+    if (m[2]) {
+      out.push(decodePdfHexText(m[2], fontMaps[currentFont]));
+      continue;
+    }
+    if (m[3]) {
+      const parts = [...m[3].matchAll(/<([0-9A-Fa-f\s]+)>|\((?:\\.|[^\\()])*\)/g)].map(part => {
+        if (part[1]) return decodePdfHexText(part[1], fontMaps[currentFont]);
+        return decodePdfLiteral(part[0]);
+      });
+      out.push(parts.join(''));
+      continue;
+    }
+    if (m[0].endsWith('Tj') && m[0].trim().startsWith('(')) {
+      out.push(decodePdfLiteral(m[0].replace(/\s*Tj$/, '')));
+      continue;
+    }
+    if (m[4] !== undefined && m[5] !== undefined) {
+      const y = Number(m[5]);
+      if (Math.abs(y) > 0.1) out.push('\n');
+      continue;
+    }
+    if (m[0] === 'T*' || m[0] === 'ET') out.push('\n');
+  }
+  return out.join('');
+}
+
+function decodePdfHexText(hex: string, cmap?: Record<string, string>): string {
+  const clean = hex.replace(/\s+/g, '').toUpperCase();
+  if (!clean) return '';
+  if (cmap && Object.keys(cmap).length) {
+    const widths = Array.from(new Set(Object.keys(cmap).map(k => k.length))).sort((a, b) => b - a);
+    let text = '';
+    for (let i = 0; i < clean.length;) {
+      let matched = false;
+      for (const width of widths) {
+        const code = clean.slice(i, i + width);
+        if (code.length === width && cmap[code] !== undefined) {
+          text += cmap[code];
+          i += width;
+          matched = true;
+          break;
+        }
+      }
+      if (!matched) {
+        // Respaldo: intenta UTF-16BE por par de bytes.
+        const part = clean.slice(i, i + 4);
+        if (part.length === 4) text += unicodeHexToString(part);
+        i += 4;
+      }
+    }
+    return text;
+  }
+  return unicodeHexToString(clean);
+}
+
+function normalizeExtractedPdfText(text: string): string {
+  return text
+    .replace(/\t+/g, ' ')
+    .replace(/[ \u00A0]+/g, ' ')
+    .replace(/\s*\n\s*/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/\s*(DIRECCIÓN|DIRECCION|REFERENCIAS|NOTAS|Empresa|Nombre|Principal|Correo|Cantidad|Descripción|Descripcion|Total|Pedido|RP\s*-\s*Pedido|CC\s*-\s*Pedido)\s*/gi, '\n$1 ')
+    .replace(/\n\s+/g, '\n')
+    .trim();
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function decodePdfLiteral(raw: string): string {
@@ -1740,28 +1970,43 @@ function parseZoeOrderText(text: string): ParsedOrderDraft {
     items: [],
   };
 
-  draft.zoe_folio = firstMatch(clean, /Pedido\s*#\s*([A-Za-z0-9-]+)/i) || firstMatch(clean, /CC\s*-\s*Pedido\s*#\s*([A-Za-z0-9-]+)/i);
-  draft.customer_phone = cleanPhone(firstMatch(clean, /Principal\s*:?\s*([+()\d\s.-]{7,})/i)) || undefined;
+  draft.zoe_folio = firstMatch(clean, /(?:RP|CC)?\s*-?\s*Pedido\s*#\s*([A-Za-z0-9-]+)/i)
+    || firstMatch(clean, /Pedido\s*#\s*([A-Za-z0-9-]+)/i);
+
   draft.customer_email = cleanEmail(firstMatch(clean, /Correo\s*:?\s*([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})/i)) || undefined;
   draft.customer_company = cleanText(firstMatch(clean, /Empresa\s*:?\s*(.+?)\s+Nombre\s*:/i)) || undefined;
-  draft.customer_name = cleanText(firstMatch(clean, /Nombre\s*:?\s*(.+?)\s+(?:Principal\s*:|Correo\s*:|DIRECCI[ÓO]N|Cantidad|REFERENCIAS)/i)) || undefined;
+  draft.customer_name = cleanText(firstMatch(clean, /Nombre\s*:?\s*(.+?)\s+(?:Principal\s*:|Correo\s*:|DIRECCI[ÓO]N|Cantidad|REFERENCIAS|(?:RP|CC)?\s*-?\s*Pedido)/i)) || undefined;
   draft.customer_contact_name = draft.customer_name;
 
-  const address = firstMatch(clean, /DIRECCI[ÓO]N\s+DE\s+ENTREGA\s*(.+?)\s+REFERENCIAS/i)
-    || firstMatch(clean, /DIRECCI[ÓO]N\s+DE\s+ENTREGA\s*(.+?)\s+(?:Empresa\s*:|Cantidad|CC\s*-)/i);
+  const phoneFromPrincipal = cleanPhone(firstMatch(clean, /Principal\s*:?\s*([+()\d\s.-]{7,})/i));
+  const phoneFromNotes = cleanPhone(firstMatch(clean, /(?:tel|cel|contacto)\s*:?\s*([+()\d\s.-]{7,}(?:\s*(?:cel|tel)\s*:?\s*[+()\d\s.-]{7,})?)/i));
+  draft.customer_phone = phoneFromPrincipal || phoneFromNotes || undefined;
+
+  const address = firstMatch(clean, /DIRECCI[ÓO]N\s+DE\s+ENTREGA\s*(.+?)\s+(?:REFERENCIAS|NOTAS|Cantidad\s+Descripci[óo]n)/i)
+    || firstMatch(clean, /DIRECCI[ÓO]N\s+DE\s+ENTREGA\s*(.+?)\s+(?:Empresa\s*:|Cantidad|(?:RP|CC)?\s*-?\s*Pedido)/i);
   draft.customer_address = cleanText(address) || undefined;
 
-  const refs = firstMatch(clean, /REFERENCIAS\s*(.+?)\s+(?:Empresa\s*:|Nombre\s*:|Cantidad|CC\s*-|Pedido\s*#)/i);
-  draft.delivery_reference = cleanText(refs) || undefined;
+  const refs = firstMatch(clean, /REFERENCIAS\s*(.+?)\s+(?:Cantidad\s+Descripci[óo]n|Empresa\s*:|Nombre\s*:|(?:RP|CC)?\s*-?\s*Pedido\s*#)/i)
+    || firstMatch(clean, /NOTAS\s*(.+?)\s+(?:Cantidad\s+Descripci[óo]n|Total\s+\$)/i);
+  draft.delivery_reference = cleanText((refs || '').replace(/^NOTAS\s*/i, '')) || undefined;
 
   const items: OrderItemRow[] = [];
-  const itemRe = /(\d+)\s+(Paquete\(s\).*?Zo[ée].*?)(?:\s+\$?([\d,]+\.\d{2}))\s+\$?([\d,]+\.\d{2})/gi;
+  const section = firstMatch(clean, /Cantidad\s+Descripci[óo]n\s+Precio\s*x\s*unidad\s+Importe\s+(.+?)\s+Total\s+\$?[\d,]+\.\d{2}/i)
+    || firstMatch(clean, /Cantidad\s+Descripci[óo]n\s+(.+?)\s+Total\s+\$?[\d,]+\.\d{2}/i)
+    || clean;
+  const itemRe = /(?:^|\s)(\d+)\s+(.+?)\s+\$?([\d,]+\.\d{2})\s+\$?([\d,]+\.\d{2})(?=\s+\d+\s+|\s*$)/gi;
   let m: RegExpExecArray | null;
-  while ((m = itemRe.exec(clean))) {
+  const seenItems = new Set<string>();
+  while ((m = itemRe.exec(section))) {
     const quantity = Number(m[1]);
+    const description = cleanText(m[2]) || '';
+    if (!description || /^(Cantidad|Descripci[óo]n|Precio|Importe|Total)$/i.test(description)) continue;
     const unitPrice = parseMoney(m[3]);
     const amount = parseMoney(m[4]);
-    items.push({ id: crypto.randomUUID(), order_id: '', quantity, description: m[2].trim(), unit_price: unitPrice, amount, sort_order: items.length });
+    const signature = `${quantity}|${description}|${unitPrice}|${amount}`.toLowerCase();
+    if (seenItems.has(signature)) continue;
+    seenItems.add(signature);
+    items.push({ id: crypto.randomUUID(), order_id: '', quantity, description, unit_price: unitPrice, amount, sort_order: items.length });
   }
   if (items.length) draft.items = items;
 
