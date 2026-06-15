@@ -184,6 +184,7 @@ export default {
       else if (url.pathname === '/api/install' && (request.method === 'GET' || request.method === 'POST')) response = await installSchema(env);
       else if (url.pathname === '/api/setup' && request.method === 'POST') response = await setupAdmin(request, env);
       else if (url.pathname === '/api/auth/login' && request.method === 'POST') response = await login(request, env);
+      else if (url.pathname === '/api/auth/mobile-admin' && request.method === 'POST') response = await mobileAdminLogin(request, env);
       else if (url.pathname === '/api/auth/logout' && request.method === 'POST') response = await logout(request, env);
       else if (url.pathname === '/api/auth/me' && request.method === 'GET') response = await me(request, env);
       else if (url.pathname === '/api/dashboard' && request.method === 'GET') response = await dashboard(request, env);
@@ -557,6 +558,19 @@ async function login(request: Request, env: Env): Promise<Response> {
 function isDefaultAdminPassword(password: string): boolean {
   const p = String(password || '').trim();
   return p === DEFAULT_ADMIN_PASSWORD || p === DEFAULT_ADMIN_PASSWORD_LEGACY;
+}
+
+
+async function mobileAdminLogin(request: Request, env: Env): Promise<Response> {
+  // Acceso de recuperación explícito para móvil.
+  // No depende de contraseña guardada previamente ni de cookies cruzadas.
+  // Usa un PIN fijo de recuperación para Marco y devuelve token Bearer.
+  const body = await parseJson<{ pin?: string; email?: string }>(request);
+  const pin = String(body.pin || '').replace(/\s+/g, '').trim();
+  const email = String(body.email || DEFAULT_ADMIN_EMAIL).trim().toLowerCase();
+  if (email !== DEFAULT_ADMIN_EMAIL) return json({ error: 'Correo no autorizado para recuperación móvil' }, 401);
+  if (pin !== '4321') return json({ error: 'PIN de recuperación incorrecto' }, 401);
+  return upsertDefaultAdminAndLogin(request, env);
 }
 
 async function upsertDefaultAdminAndLogin(request: Request, env: Env): Promise<Response> {

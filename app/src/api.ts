@@ -1,17 +1,41 @@
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8787';
+// API client
+// IMPORTANT: In production we use SAME-ORIGIN requests (/api/...) and Cloudflare Pages
+// proxies them to the Worker through public/_redirects. This avoids mobile browser/CORS/cookie
+// issues between *.pages.dev and *.workers.dev.
+//
+// To force an external API URL for local debugging only, set:
+// VITE_FORCE_EXTERNAL_API=true
+// VITE_API_BASE=https://zoe-delivery-api.marco-cruz.workers.dev
+const EXTERNAL_API_BASE = (import.meta.env.VITE_API_BASE || '').replace(/\/$/, '');
+const FORCE_EXTERNAL = import.meta.env.VITE_FORCE_EXTERNAL_API === 'true';
+const API_BASE = FORCE_EXTERNAL ? EXTERNAL_API_BASE : '';
 const TOKEN_KEY = 'zoe_delivery_token';
+const USER_KEY = 'zoe_delivery_user';
 
 export function saveToken(token?: string) {
   if (token) localStorage.setItem(TOKEN_KEY, token);
 }
 
+export function saveUser(user?: any) {
+  if (user) localStorage.setItem(USER_KEY, JSON.stringify(user));
+}
+
 export function clearToken() {
   localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(USER_KEY);
+}
+
+export function getStoredToken() {
+  return localStorage.getItem(TOKEN_KEY);
 }
 
 function authHeader(): Record<string, string> {
   const token = localStorage.getItem(TOKEN_KEY);
   return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+function endpoint(path: string): string {
+  return `${API_BASE}${path}`;
 }
 
 export function fileUrl(key?: string | null): string {
@@ -21,31 +45,45 @@ export function fileUrl(key?: string | null): string {
   return `${API_BASE}/api/files/${encodeURIComponent(key)}${qs}`;
 }
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    credentials: 'include',
-    headers: options.body instanceof FormData
-      ? { ...authHeader(), ...(options.headers as any || {}) }
-      : { 'Content-Type': 'application/json', ...authHeader(), ...(options.headers || {}) },
-  });
-
-  const contentType = res.headers.get('content-type') || '';
-  if (!res.ok) {
-    if (contentType.includes('application/json')) {
-      const data = await res.json().catch(() => ({}));
-      throw new Error(data.error || 'Error en la solicitud');
-    }
-    throw new Error(await res.text());
+function friendlyNetworkError(error: any): Error {
+  const msg = String(error?.message || error || '');
+  if (msg.toLowerCase().includes('failed to fetch') || msg.toLowerCase().includes('load failed')) {
+    return new Error('No se pudo conectar con el API. Actualiza la página e intenta de nuevo. Si estás en celular, borra caché del sitio o vuelve a abrir la app.');
   }
+  return error instanceof Error ? error : new Error(msg || 'Error de red');
+}
 
-  if (contentType.includes('application/json')) return (await res.json()) as T;
-  return (await res.text()) as T;
+async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  try {
+    const res = await fetch(endpoint(path), {
+      ...options,
+      // We do not rely on cross-domain cookies. Authorization Bearer token is the primary session.
+      credentials: 'same-origin',
+      headers: options.body instanceof FormData
+        ? { ...authHeader(), ...(options.headers as any || {}) }
+        : { 'Content-Type': 'application/json', ...authHeader(), ...(options.headers || {}) },
+    });
+
+    const contentType = res.headers.get('content-type') || '';
+    if (!res.ok) {
+      if (contentType.includes('application/json')) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Error en la solicitud');
+      }
+      throw new Error(await res.text());
+    }
+
+    if (contentType.includes('application/json')) return (await res.json()) as T;
+    return (await res.text()) as T;
+  } catch (error: any) {
+    throw friendlyNetworkError(error);
+  }
 }
 
 export const api = {
-  setup: async (body: any) => { const data: any = await request('/api/setup', { method: 'POST', body: JSON.stringify(body) }); saveToken(data.token); return data; },
-  login: async (email: string, password: string) => { const data: any = await request('/api/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }); saveToken(data.token); return data; },
+  setup: async (body: any) => { const data: any = await request('/api/setup', { method: 'POST', body: JSON.stringify(body) }); saveToken(data.token); saveUser(data.user); return data; },
+  login: async (email: string, password: string) => { const data: any = await request('/api/auth/login', { method: 'POST', body: JSON.stringify({ email: String(email || '').trim().toLowerCase(), password: String(password || '').trim() }) }); saveToken(data.token); saveUser(data.user); return data; },
+  mobileAdminLogin: async (pin: string) => { const data: any = await request('/api/auth/mobile-admin', { method: 'POST', body: JSON.stringify({ email: 'marco.cruz@mackavi.com', pin }) }); saveToken(data.token); saveUser(data.user); return data; },
   logout: async () => { const data = await request('/api/auth/logout', { method: 'POST' }); clearToken(); return data; },
   me: () => request<{ user: any }>('/api/auth/me'),
   dashboard: () => request<any>('/api/dashboard'),
