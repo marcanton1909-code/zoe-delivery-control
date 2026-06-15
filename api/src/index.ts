@@ -677,15 +677,41 @@ async function createUser(request: Request, env: Env): Promise<Response> {
   requirePassword(body.password);
   if (!['admin', 'coordinador', 'almacen', 'repartidor'].includes(body.role)) throw new Error('Rol inválido');
 
+  const email = body.email.trim().toLowerCase();
+
+  const existing = await env.DB.prepare(
+    'SELECT id, name, email, role, active FROM users WHERE LOWER(email) = LOWER(?) LIMIT 1'
+  ).bind(email).first<any>();
+
+  if (existing) {
+    return json({
+      error: `Ya existe un usuario registrado con el correo ${email}. Usa otro correo o edita/reactiva ese usuario desde la base de datos.`,
+      code: 'USER_EMAIL_EXISTS',
+      user: { id: existing.id, name: existing.name, email: existing.email, role: existing.role, active: existing.active },
+    }, 409);
+  }
+
   const id = crypto.randomUUID();
   const hash = await hashPassword(body.password);
-  await env.DB.prepare(
-    'INSERT INTO users (id, name, email, password_hash, role, phone, active) VALUES (?, ?, ?, ?, ?, ?, 1)'
-  )
-    .bind(id, body.name.trim(), body.email.trim().toLowerCase(), hash, body.role, body.phone || null)
-    .run();
-  await audit(env, actor.id, 'create_user', 'users', id, JSON.stringify({ email: body.email, role: body.role }));
-  return json({ ok: true, user: { id, name: body.name, email: body.email.toLowerCase(), role: body.role } }, 201);
+  try {
+    await env.DB.prepare(
+      'INSERT INTO users (id, name, email, password_hash, role, phone, active) VALUES (?, ?, ?, ?, ?, ?, 1)'
+    )
+      .bind(id, body.name.trim(), email, hash, body.role, body.phone || null)
+      .run();
+  } catch (err: any) {
+    const msg = String(err?.message || err || '');
+    if (msg.includes('UNIQUE constraint failed') && msg.includes('users.email')) {
+      return json({
+        error: `Ya existe un usuario registrado con el correo ${email}. Usa otro correo o edita/reactiva ese usuario existente.`,
+        code: 'USER_EMAIL_EXISTS',
+      }, 409);
+    }
+    throw err;
+  }
+
+  await audit(env, actor.id, 'create_user', 'users', id, JSON.stringify({ email, role: body.role }));
+  return json({ ok: true, user: { id, name: body.name, email, role: body.role } }, 201);
 }
 
 

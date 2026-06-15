@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { api, fileUrl } from '../api';
 import { Field } from '../components/Field';
 import { Customer, ExtractedOrderDraft, OrderItem, Route, User } from '../types';
+import { extractZoeOrderFromPdfInBrowser } from '../utils/zoePdfClient';
 
 type ItemDraft = { quantity: number; description: string; unit_price: number; amount: number };
 type Draft = {
@@ -137,17 +138,30 @@ export default function NewOrder() {
     setParseNote('');
     setCustomerMatch(null);
     try {
-      const form = new FormData();
-      form.append('original_pdf', pdfFile);
-      const res = await api.extractOrderPdf(form);
-      applyExtractedDraft(res.draft || {}, res.pdf_key);
-      setCustomerMatch(res.customer_match || null);
-      setConfidence(typeof res.confidence === 'number' ? res.confidence : null);
-      setParsePreview(res.raw_text_preview || '');
-      setParseNote(res.notes || 'Datos extraídos. Revisa antes de guardar.');
-      setMessage('PDF procesado. Revisa los campos antes de guardar la orden.');
-    } catch (err: any) {
-      setMessage(err.message);
+      // La extracción se hace primero en el navegador con PDF.js, porque los PDF reales de Zoé
+      // usan fuentes internas que Cloudflare Workers puede leer mal si se intenta parsear a mano.
+      const browserResult = await extractZoeOrderFromPdfInBrowser(pdfFile);
+      applyExtractedDraft(browserResult.draft || {}, draft.original_pdf_key || '');
+      setCustomerMatch(null);
+      setConfidence(browserResult.confidence);
+      setParsePreview(browserResult.rawText.slice(0, 5000));
+      setParseNote(browserResult.note);
+      setMessage('PDF procesado en el navegador. Revisa los campos antes de guardar la orden.');
+    } catch (clientErr: any) {
+      // Fallback: si el navegador no puede leer el PDF, usa el extractor del API y guarda el PDF en R2.
+      try {
+        const form = new FormData();
+        form.append('original_pdf', pdfFile);
+        const res = await api.extractOrderPdf(form);
+        applyExtractedDraft(res.draft || {}, res.pdf_key);
+        setCustomerMatch(res.customer_match || null);
+        setConfidence(typeof res.confidence === 'number' ? res.confidence : null);
+        setParsePreview(res.raw_text_preview || '');
+        setParseNote(res.notes || 'Datos extraídos. Revisa antes de guardar.');
+        setMessage('PDF procesado. Revisa los campos antes de guardar la orden.');
+      } catch (apiErr: any) {
+        setMessage(clientErr?.message || apiErr?.message || 'No se pudo extraer texto del PDF.');
+      }
     } finally {
       setParsing(false);
     }
