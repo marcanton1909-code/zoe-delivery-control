@@ -1754,12 +1754,32 @@ type PdfStreamInfo = {
 
 async function readPdfStreams(binary: string): Promise<PdfStreamInfo[]> {
   const streams: PdfStreamInfo[] = [];
-  const re = /(\d+)\s+0\s+obj\s*([\s\S]*?)stream\r?\n([\s\S]*?)\r?\nendstream/g;
+
+  // Importante: no buscar "obj ... stream ... endstream" de forma global, porque algunos PDFs
+  // de Zoé tienen objetos sin stream antes del primer stream y una regex amplia termina
+  // mezclando objetos. Primero aislamos cada objeto y solo después leemos su stream interno.
+  const objRe = /(\d+)\s+0\s+obj([\s\S]*?)endobj/g;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(binary))) {
+  while ((m = objRe.exec(binary))) {
     const objectId = Number(m[1]);
-    const dictionary = m[2] || '';
-    const raw = m[3] || '';
+    const body = m[2] || '';
+    const streamIndex = body.indexOf('stream');
+    const endStreamIndex = body.lastIndexOf('endstream');
+    if (streamIndex < 0 || endStreamIndex < 0 || endStreamIndex <= streamIndex) continue;
+
+    const dictionary = body.slice(0, streamIndex);
+    let raw = body.slice(streamIndex + 'stream'.length, endStreamIndex);
+
+    // El contenido de stream normalmente empieza después de LF/CRLF y termina antes de LF/CRLF.
+    // Quitar solo esos saltos envolventes evita corromper bytes binarios comprimidos.
+    if (raw.startsWith('\r\n')) raw = raw.slice(2);
+    else if (raw.startsWith('\n')) raw = raw.slice(1);
+    else if (raw.startsWith('\r')) raw = raw.slice(1);
+
+    if (raw.endsWith('\r\n')) raw = raw.slice(0, -2);
+    else if (raw.endsWith('\n')) raw = raw.slice(0, -1);
+    else if (raw.endsWith('\r')) raw = raw.slice(0, -1);
+
     const isFlate = /\/FlateDecode\b/.test(dictionary);
     let decoded = raw;
     if (isFlate) {
