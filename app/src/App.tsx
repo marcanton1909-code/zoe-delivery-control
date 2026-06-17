@@ -110,7 +110,7 @@ export default function App() {
         </div>
       </aside>
       <main className="content">{page}</main>
-      <nav className="bottom-nav">{nav.slice(0,5).map((n) => <a key={n.href} className={route === n.href.replace('#','') ? 'active' : ''} href={n.href}>{n.label}</a>)}</nav>
+      <nav className="bottom-nav">{nav.slice(0,4).map((n) => <a key={n.href} className={route === n.href.replace('#','') ? 'active' : ''} href={n.href}>{n.label}</a>)}<button type="button" className="bottom-logout" onClick={logout}>Salir</button></nav>
     </div>
   );
 }

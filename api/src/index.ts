@@ -29,6 +29,7 @@ interface Env {
 interface User {
   id: string;
   name: string;
+  username?: string | null;
   email: string;
   role: Role;
   active: number;
@@ -253,25 +254,27 @@ async function setupAdmin(request: Request, env: Env): Promise<Response> {
   // Además, si el correo ya existe, actualiza ese usuario como admin activo y cambia su contraseña.
   await ensureSchema(env);
 
-  const body = await parseJson<{ name: string; email: string; password: string }>(request);
+  const body = await parseJson<{ name: string; email: string; password: string; username?: string }>(request);
   requireString(body.name, 'name');
   requireEmail(body.email);
   requirePassword(body.password);
 
   const email = body.email.trim().toLowerCase();
+  const username = normalizeUsername(body.username || email.split('@')[0] || 'marco.cruz');
   const name = body.name.trim();
   const passwordHash = await hashPassword(body.password);
-  const existing = await env.DB.prepare('SELECT id FROM users WHERE email = ?').bind(email).first<{ id: string }>();
+  await ensureUsersUsernameColumn(env);
+  const existing = await env.DB.prepare('SELECT id FROM users WHERE email = ? OR username = ?').bind(email, username).first<{ id: string }>();
   const id = existing?.id || crypto.randomUUID();
 
   if (existing?.id) {
     await env.DB.prepare(
-      `UPDATE users SET name = ?, password_hash = ?, role = 'admin', active = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
-    ).bind(name, passwordHash, id).run();
+      `UPDATE users SET name = ?, username = ?, email = ?, password_hash = ?, role = 'admin', active = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
+    ).bind(name, username, email, passwordHash, id).run();
   } else {
     await env.DB.prepare(
-      `INSERT INTO users (id, name, email, password_hash, role, active) VALUES (?, ?, ?, ?, 'admin', 1)`
-    ).bind(id, name, email, passwordHash).run();
+      `INSERT INTO users (id, name, email, username, password_hash, role, active) VALUES (?, ?, ?, ?, ?, 'admin', 1)`
+    ).bind(id, name, email, username, passwordHash).run();
   }
 
   // Crea sesión automáticamente para que no tengas que hacer login aparte.
@@ -304,6 +307,23 @@ async function ensureSchema(env: Env): Promise<void> {
   for (const statement of statements) {
     await env.DB.prepare(statement).run();
   }
+  await ensureUsersUsernameColumn(env);
+}
+
+async function ensureUsersUsernameColumn(env: Env): Promise<void> {
+  const info = await env.DB.prepare('PRAGMA table_info(users)').all<any>();
+  const columns = (info.results || []).map((row: any) => row.name);
+  if (!columns.includes('username')) {
+    await env.DB.prepare('ALTER TABLE users ADD COLUMN username TEXT').run();
+  }
+  await env.DB.prepare(`UPDATE users
+    SET username = CASE
+      WHEN LOWER(email) = ? THEN 'marco.cruz'
+      WHEN instr(email, '@') > 0 THEN LOWER(substr(email, 1, instr(email, '@') - 1))
+      ELSE LOWER(email)
+    END
+    WHERE username IS NULL OR TRIM(username) = ''`).bind(DEFAULT_ADMIN_EMAIL).run();
+  await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)').run();
 }
 
 const SCHEMA_SQL = `
@@ -311,6 +331,7 @@ CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   email TEXT UNIQUE NOT NULL,
+  username TEXT,
   password_hash TEXT NOT NULL,
   role TEXT NOT NULL CHECK(role IN ('admin', 'coordinador', 'almacen', 'repartidor')),
   phone TEXT,
@@ -527,24 +548,31 @@ CREATE INDEX IF NOT EXISTS idx_inventory_movements_created ON inventory_movement
 const DEFAULT_ADMIN_EMAIL = 'marco.cruz@mackavi.com';
 const DEFAULT_ADMIN_PASSWORD = 'Admin1234';
 const DEFAULT_ADMIN_NAME = 'Marco Cruz';
+const DEFAULT_ADMIN_USERNAME = 'marco.cruz';
 
 async function login(request: Request, env: Env): Promise<Response> {
-  const body = await parseJson<{ email: string; password: string }>(request);
-  const email = body.email?.trim().toLowerCase();
-  const password = body.password || '';
+  await ensureSchema(env);
+  const body = await parseJson<{ email?: string; username?: string; login?: string; password: string }>(request);
+  const loginId = String(body.login || body.email || body.username || '').trim().toLowerCase();
+  const password = String(body.password || '').trim();
 
-  // Acceso inicial simplificado: si se intenta entrar con el admin definido,
-  // la API crea/verifica tablas, crea o repara el usuario admin y abre sesión.
-  // Esto evita usar curl o insertar usuarios manualmente en D1.
-  if (email === DEFAULT_ADMIN_EMAIL && (password === DEFAULT_ADMIN_PASSWORD || password === 'Admin1234!')) {
+  if (!loginId) return json({ error: 'Ingresa usuario o correo' }, 400);
+
+  // Acceso inicial simplificado para admin existente.
+  if ((loginId === DEFAULT_ADMIN_EMAIL || loginId === DEFAULT_ADMIN_USERNAME) && (password === DEFAULT_ADMIN_PASSWORD || password === 'Admin1234!')) {
     return upsertDefaultAdminAndLogin(request, env);
   }
 
-  const user = await env.DB.prepare('SELECT * FROM users WHERE email = ? AND active = 1').bind(email).first<any>();
-  if (!user) return json({ error: 'Correo o contraseña incorrectos' }, 401);
+  const user = await env.DB.prepare(
+    `SELECT * FROM users
+     WHERE active = 1 AND (LOWER(email) = LOWER(?) OR LOWER(username) = LOWER(?))
+     LIMIT 1`
+  ).bind(loginId, loginId).first<any>();
+
+  if (!user) return json({ error: 'Usuario/correo o contraseña incorrectos' }, 401);
 
   const ok = await verifyPassword(password, user.password_hash);
-  if (!ok) return json({ error: 'Correo o contraseña incorrectos' }, 401);
+  if (!ok) return json({ error: 'Usuario/correo o contraseña incorrectos' }, 401);
 
   return createLoginSession(request, env, user);
 }
@@ -553,8 +581,9 @@ async function upsertDefaultAdminAndLogin(request: Request, env: Env): Promise<R
   await ensureSchema(env);
 
   const passwordHash = await hashPassword(DEFAULT_ADMIN_PASSWORD);
-  const existing = await env.DB.prepare('SELECT id FROM users WHERE email = ?')
-    .bind(DEFAULT_ADMIN_EMAIL)
+  await ensureUsersUsernameColumn(env);
+  const existing = await env.DB.prepare('SELECT id FROM users WHERE email = ? OR username = ?')
+    .bind(DEFAULT_ADMIN_EMAIL, DEFAULT_ADMIN_USERNAME)
     .first<{ id: string }>();
 
   const id = existing?.id || 'admin-marco-cruz';
@@ -562,14 +591,14 @@ async function upsertDefaultAdminAndLogin(request: Request, env: Env): Promise<R
   if (existing?.id) {
     await env.DB.prepare(
       `UPDATE users
-       SET name = ?, password_hash = ?, role = 'admin', active = 1, updated_at = CURRENT_TIMESTAMP
+       SET name = ?, email = ?, username = ?, password_hash = ?, role = 'admin', active = 1, updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`
-    ).bind(DEFAULT_ADMIN_NAME, passwordHash, id).run();
+    ).bind(DEFAULT_ADMIN_NAME, DEFAULT_ADMIN_EMAIL, DEFAULT_ADMIN_USERNAME, passwordHash, id).run();
   } else {
     await env.DB.prepare(
-      `INSERT INTO users (id, name, email, password_hash, role, active)
-       VALUES (?, ?, ?, ?, 'admin', 1)`
-    ).bind(id, DEFAULT_ADMIN_NAME, DEFAULT_ADMIN_EMAIL, passwordHash).run();
+      `INSERT INTO users (id, name, email, username, password_hash, role, active)
+       VALUES (?, ?, ?, ?, ?, 'admin', 1)`
+    ).bind(id, DEFAULT_ADMIN_NAME, DEFAULT_ADMIN_EMAIL, DEFAULT_ADMIN_USERNAME, passwordHash).run();
   }
 
   const user = await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(id).first<any>();
@@ -667,23 +696,35 @@ async function listUsers(request: Request, env: Env): Promise<Response> {
 
 async function createUser(request: Request, env: Env): Promise<Response> {
   const actor = await requireRole(request, env, ['admin']);
-  const body = await parseJson<{ name: string; email: string; password: string; role: Role; phone?: string }>(request);
+  await ensureUsersUsernameColumn(env);
+  const body = await parseJson<{ name: string; username?: string; email?: string; password: string; role: Role; phone?: string }>(request);
   requireString(body.name, 'name');
-  requireEmail(body.email);
   requirePassword(body.password);
   if (!['admin', 'coordinador', 'almacen', 'repartidor'].includes(body.role)) throw new Error('Rol inválido');
 
-  const email = body.email.trim().toLowerCase();
+  const username = normalizeUsername(body.username || body.email || body.name);
+  if (!username) return json({ error: 'El usuario es obligatorio' }, 400);
+  if (!/^[a-z0-9._-]{3,40}$/.test(username)) {
+    return json({ error: 'El usuario solo puede usar minúsculas, números, punto, guion o guion bajo. Mínimo 3 caracteres.' }, 400);
+  }
+
+  const emailInput = String(body.email || '').trim().toLowerCase();
+  const email = emailInput || `${username}@local.mackavi`;
+  if (emailInput) requireEmail(emailInput);
 
   const existing = await env.DB.prepare(
-    'SELECT id, name, email, role, active FROM users WHERE LOWER(email) = LOWER(?) LIMIT 1'
-  ).bind(email).first<any>();
+    `SELECT id, name, username, email, role, active
+     FROM users
+     WHERE LOWER(username) = LOWER(?) OR LOWER(email) = LOWER(?)
+     LIMIT 1`
+  ).bind(username, email).first<any>();
 
   if (existing) {
+    const field = String(existing.username || '').toLowerCase() === username.toLowerCase() ? `usuario ${username}` : `correo ${email}`;
     return json({
-      error: `Ya existe un usuario registrado con el correo ${email}. Usa otro correo o edita/reactiva ese usuario desde la base de datos.`,
-      code: 'USER_EMAIL_EXISTS',
-      user: { id: existing.id, name: existing.name, email: existing.email, role: existing.role, active: existing.active },
+      error: `Ya existe un usuario registrado con el ${field}. Usa otro usuario/correo.`,
+      code: 'USER_EXISTS',
+      user: { id: existing.id, name: existing.name, username: existing.username, email: existing.email, role: existing.role, active: existing.active },
     }, 409);
   }
 
@@ -691,23 +732,20 @@ async function createUser(request: Request, env: Env): Promise<Response> {
   const hash = await hashPassword(body.password);
   try {
     await env.DB.prepare(
-      'INSERT INTO users (id, name, email, password_hash, role, phone, active) VALUES (?, ?, ?, ?, ?, ?, 1)'
+      'INSERT INTO users (id, name, email, username, password_hash, role, phone, active) VALUES (?, ?, ?, ?, ?, ?, ?, 1)'
     )
-      .bind(id, body.name.trim(), email, hash, body.role, body.phone || null)
+      .bind(id, body.name.trim(), email, username, hash, body.role, cleanText(body.phone))
       .run();
   } catch (err: any) {
     const msg = String(err?.message || err || '');
-    if (msg.includes('UNIQUE constraint failed') && msg.includes('users.email')) {
-      return json({
-        error: `Ya existe un usuario registrado con el correo ${email}. Usa otro correo o edita/reactiva ese usuario existente.`,
-        code: 'USER_EMAIL_EXISTS',
-      }, 409);
+    if (msg.includes('UNIQUE constraint failed')) {
+      return json({ error: 'Ya existe un usuario con ese usuario o correo.', code: 'USER_EXISTS' }, 409);
     }
     throw err;
   }
 
-  await audit(env, actor.id, 'create_user', 'users', id, JSON.stringify({ email, role: body.role }));
-  return json({ ok: true, user: { id, name: body.name, email, role: body.role } }, 201);
+  await audit(env, actor.id, 'create_user', 'users', id, JSON.stringify({ username, email, role: body.role }));
+  return json({ ok: true, user: { id, name: body.name, username, email, role: body.role } }, 201);
 }
 
 
@@ -1549,6 +1587,7 @@ async function getFile(request: Request, env: Env): Promise<Response> {
 }
 
 async function requireUser(request: Request, env: Env): Promise<User> {
+  await ensureUsersUsernameColumn(env);
   const auth = request.headers.get('Authorization') || '';
   const bearer = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : '';
   const urlToken = new URL(request.url).searchParams.get('token') || '';
@@ -1556,7 +1595,7 @@ async function requireUser(request: Request, env: Env): Promise<User> {
   if (!token) throw httpError('Sesión requerida', 401);
   const tokenHash = await sha256(token);
   const row = await env.DB.prepare(
-    `SELECT u.id, u.name, u.email, u.role, u.active
+    `SELECT u.id, u.name, u.username, u.email, u.role, u.active
      FROM sessions s JOIN users u ON u.id = s.user_id
      WHERE s.token_hash = ? AND s.expires_at > CURRENT_TIMESTAMP AND u.active = 1`
   )
@@ -2309,7 +2348,7 @@ function fuelLabel(value: string): string {
 }
 
 function publicUser(user: any): User {
-  return { id: user.id, name: user.name, email: user.email, role: user.role, active: user.active };
+  return { id: user.id, name: user.name, username: user.username, email: user.email, role: user.role, active: user.active };
 }
 
 async function putR2(env: Env, key: string, file: File, contentType: string): Promise<string> {
@@ -2435,6 +2474,19 @@ function toInt(value: FormDataEntryValue | string | number | null, fallback: num
 function parseNumberOrNull(value: FormDataEntryValue | null): number | null {
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
+}
+
+function normalizeUsername(value: any): string {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/@.*$/, '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/\s+/g, '.')
+    .replace(/[^a-z0-9._-]/g, '')
+    .replace(/\.+/g, '.')
+    .replace(/^[._-]+|[._-]+$/g, '');
 }
 
 function requireString(value: unknown, field: string): void {

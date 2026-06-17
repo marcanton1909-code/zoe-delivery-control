@@ -74,7 +74,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
 export const api = {
   setup: async (body: any) => { const data: any = await request('/api/setup', { method: 'POST', body: JSON.stringify(body) }); saveToken(data.token); return data; },
-  login: async (email: string, password: string) => { const data: any = await request('/api/auth/login', { method: 'POST', body: JSON.stringify({ email: email.trim().toLowerCase(), password: password.trim() }) }); saveToken(data.token); return data; },
+  login: async (loginId: string, password: string) => { const data: any = await request('/api/auth/login', { method: 'POST', body: JSON.stringify({ login: loginId.trim().toLowerCase(), password: password.trim() }) }); saveToken(data.token); return data; },
   logout: async () => { const data = await request('/api/auth/logout', { method: 'POST' }); clearToken(); return data; },
   me: () => request<{ user: any }>('/api/auth/me'),
   dashboard: () => request<any>('/api/dashboard'),

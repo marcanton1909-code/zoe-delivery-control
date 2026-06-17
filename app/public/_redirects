@@ -1,4 +1,0 @@
-# Same-origin API proxy for Cloudflare Pages.
-# This eliminates mobile browser failures caused by CORS/cross-domain cookies.
-/api/*  https://zoe-delivery-api.marco-cruz.workers.dev/api/:splat  200
-/health  https://zoe-delivery-api.marco-cruz.workers.dev/health  200

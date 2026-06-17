@@ -47,8 +47,9 @@ export default function Settings() {
         <form className="card form-grid" onSubmit={createUser}>
           <h3 className="full">Crear usuario</h3>
           <Field label="Nombre"><input name="name" required /></Field>
-          <Field label="Correo"><input name="email" type="email" required /></Field>
-          <Field label="Contraseña"><input name="password" type="password" minLength={8} required /></Field>
+          <Field label="Usuario"><input name="username" required placeholder="alfredo.cruz" autoCapitalize="none" autoCorrect="off" /></Field>
+          <Field label="Correo opcional"><input name="email" type="email" placeholder="opcional" /></Field>
+          <Field label="Contraseña"><input name="password" type="password" minLength={6} required /></Field>
           <Field label="Rol"><select name="role"><option value="coordinador">Coordinador</option><option value="almacen">Almacén</option><option value="repartidor">Repartidor</option><option value="admin">Admin</option></select></Field>
           <Field label="Teléfono"><input name="phone" /></Field>
           <button className="btn primary full">Crear usuario</button>
@@ -64,7 +65,7 @@ export default function Settings() {
       </div>
 
       <div className="two-col">
-        <section className="card"><h3>Usuarios</h3><div className="table-wrap"><table><thead><tr><th>Nombre</th><th>Correo</th><th>Rol</th></tr></thead><tbody>{users.map(u => <tr key={u.id}><td>{u.name}</td><td>{u.email}</td><td>{u.role}</td></tr>)}</tbody></table></div></section>
+        <section className="card"><h3>Usuarios</h3><div className="table-wrap"><table><thead><tr><th>Nombre</th><th>Usuario</th><th>Correo</th><th>Rol</th></tr></thead><tbody>{users.map(u => <tr key={u.id}><td>{u.name}</td><td>{u.username || '-'}</td><td>{u.email?.includes('@local.mackavi') ? '-' : u.email}</td><td>{u.role}</td></tr>)}</tbody></table></div></section>
         <section className="card"><h3>Rutas</h3><div className="table-wrap"><table><thead><tr><th>Ruta</th><th>Zona</th><th>Unidad</th></tr></thead><tbody>{routes.map(r => <tr key={r.id}><td>{r.name}</td><td>{r.zone || '-'}</td><td>{r.default_vehicle || '-'}</td></tr>)}</tbody></table></div></section>
       </div>
     </div>
