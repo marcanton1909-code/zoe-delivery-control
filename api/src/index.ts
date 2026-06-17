@@ -184,7 +184,6 @@ export default {
       else if (url.pathname === '/api/install' && (request.method === 'GET' || request.method === 'POST')) response = await installSchema(env);
       else if (url.pathname === '/api/setup' && request.method === 'POST') response = await setupAdmin(request, env);
       else if (url.pathname === '/api/auth/login' && request.method === 'POST') response = await login(request, env);
-      else if (url.pathname === '/api/auth/mobile-admin' && request.method === 'POST') response = await mobileAdminLogin(request, env);
       else if (url.pathname === '/api/auth/logout' && request.method === 'POST') response = await logout(request, env);
       else if (url.pathname === '/api/auth/me' && request.method === 'GET') response = await me(request, env);
       else if (url.pathname === '/api/dashboard' && request.method === 'GET') response = await dashboard(request, env);
@@ -225,19 +224,15 @@ export default {
 };
 
 function withCors(request: Request, env: Env, response: Response): Response {
-  const origin = request.headers.get('Origin') || '';
-  const allowed = (env.ALLOWED_ORIGIN || 'http://localhost:5173')
-    .split(',')
-    .map((x) => x.trim())
-    .filter(Boolean);
-  const allowOrigin = allowed.includes(origin) || origin.includes('localhost') || origin.includes('127.0.0.1') ? origin : allowed[0] || origin;
-
+  // Login estable para cualquier navegador/celular:
+  // La app usa Authorization: Bearer <token>, no cookies. Por eso se permite CORS abierto
+  // y se deshabilitan credenciales cross-domain.
   const headers = new Headers(response.headers);
-  headers.set('Access-Control-Allow-Origin', allowOrigin);
-  headers.set('Access-Control-Allow-Credentials', 'true');
-  headers.set('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
+  headers.set('Access-Control-Allow-Origin', '*');
+  headers.set('Access-Control-Allow-Credentials', 'false');
+  headers.set('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
   headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  headers.set('Vary', 'Origin');
+  headers.set('Access-Control-Max-Age', '86400');
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
@@ -265,7 +260,7 @@ async function setupAdmin(request: Request, env: Env): Promise<Response> {
 
   const email = body.email.trim().toLowerCase();
   const name = body.name.trim();
-  const passwordHash = await hashPassword(String(body.password || '').trim());
+  const passwordHash = await hashPassword(body.password);
   const existing = await env.DB.prepare('SELECT id FROM users WHERE email = ?').bind(email).first<{ id: string }>();
   const id = existing?.id || crypto.randomUUID();
 
@@ -531,46 +526,27 @@ CREATE INDEX IF NOT EXISTS idx_inventory_movements_created ON inventory_movement
 
 const DEFAULT_ADMIN_EMAIL = 'marco.cruz@mackavi.com';
 const DEFAULT_ADMIN_PASSWORD = 'Admin1234';
-const DEFAULT_ADMIN_PASSWORD_LEGACY = 'Admin1234!';
 const DEFAULT_ADMIN_NAME = 'Marco Cruz';
 
 async function login(request: Request, env: Env): Promise<Response> {
   const body = await parseJson<{ email: string; password: string }>(request);
-  const email = String(body.email || '').trim().toLowerCase();
-  const password = String(body.password || '').trim();
+  const email = body.email?.trim().toLowerCase();
+  const password = body.password || '';
 
-  // Acceso de recuperación para el admin principal.
-  // Acepta Admin1234 y Admin1234! para destrabar móviles/autocorrector,
-  // repara el usuario en D1, lo activa como admin y genera token.
-  if (email === DEFAULT_ADMIN_EMAIL && isDefaultAdminPassword(password)) {
+  // Acceso inicial simplificado: si se intenta entrar con el admin definido,
+  // la API crea/verifica tablas, crea o repara el usuario admin y abre sesión.
+  // Esto evita usar curl o insertar usuarios manualmente en D1.
+  if (email === DEFAULT_ADMIN_EMAIL && (password === DEFAULT_ADMIN_PASSWORD || password === 'Admin1234!')) {
     return upsertDefaultAdminAndLogin(request, env);
   }
 
-  const user = await env.DB.prepare('SELECT * FROM users WHERE LOWER(email) = LOWER(?) AND active = 1').bind(email).first<any>();
+  const user = await env.DB.prepare('SELECT * FROM users WHERE email = ? AND active = 1').bind(email).first<any>();
   if (!user) return json({ error: 'Correo o contraseña incorrectos' }, 401);
 
   const ok = await verifyPassword(password, user.password_hash);
   if (!ok) return json({ error: 'Correo o contraseña incorrectos' }, 401);
 
   return createLoginSession(request, env, user);
-}
-
-function isDefaultAdminPassword(password: string): boolean {
-  const p = String(password || '').trim();
-  return p === DEFAULT_ADMIN_PASSWORD || p === DEFAULT_ADMIN_PASSWORD_LEGACY;
-}
-
-
-async function mobileAdminLogin(request: Request, env: Env): Promise<Response> {
-  // Acceso de recuperación explícito para móvil.
-  // No depende de contraseña guardada previamente ni de cookies cruzadas.
-  // Usa un PIN fijo de recuperación para Marco y devuelve token Bearer.
-  const body = await parseJson<{ pin?: string; email?: string }>(request);
-  const pin = String(body.pin || '').replace(/\s+/g, '').trim();
-  const email = String(body.email || DEFAULT_ADMIN_EMAIL).trim().toLowerCase();
-  if (email !== DEFAULT_ADMIN_EMAIL) return json({ error: 'Correo no autorizado para recuperación móvil' }, 401);
-  if (pin !== '4321') return json({ error: 'PIN de recuperación incorrecto' }, 401);
-  return upsertDefaultAdminAndLogin(request, env);
 }
 
 async function upsertDefaultAdminAndLogin(request: Request, env: Env): Promise<Response> {
@@ -1850,7 +1826,8 @@ async function inflatePdfData(data: Uint8Array): Promise<Uint8Array | null> {
   const formats = ['deflate', 'deflate-raw'] as const;
   for (const format of formats) {
     try {
-      const stream = new Blob([data]).stream().pipeThrough(new DS(format));
+      const copy = data.slice();
+      const stream = new Blob([copy.buffer as ArrayBuffer]).stream().pipeThrough(new DS(format));
       const buffer = await new Response(stream).arrayBuffer();
       return new Uint8Array(buffer);
     } catch {

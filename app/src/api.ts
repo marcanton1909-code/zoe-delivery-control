@@ -1,89 +1,80 @@
-// API client
-// IMPORTANT: In production we use SAME-ORIGIN requests (/api/...) and Cloudflare Pages
-// proxies them to the Worker through public/_redirects. This avoids mobile browser/CORS/cookie
-// issues between *.pages.dev and *.workers.dev.
-//
-// To force an external API URL for local debugging only, set:
-// VITE_FORCE_EXTERNAL_API=true
-// VITE_API_BASE=https://zoe-delivery-api.marco-cruz.workers.dev
-const EXTERNAL_API_BASE = (import.meta.env.VITE_API_BASE || '').replace(/\/$/, '');
-const FORCE_EXTERNAL = import.meta.env.VITE_FORCE_EXTERNAL_API === 'true';
-const API_BASE = FORCE_EXTERNAL ? EXTERNAL_API_BASE : '';
+const API_BASE = (import.meta.env.VITE_API_BASE || 'https://zoe-delivery-api.marco-cruz.workers.dev').replace(/\/$/, '');
 const TOKEN_KEY = 'zoe_delivery_token';
-const USER_KEY = 'zoe_delivery_user';
+const LEGACY_TOKEN_KEY = 'token';
 
-export function saveToken(token?: string) {
-  if (token) localStorage.setItem(TOKEN_KEY, token);
+export function getToken(): string {
+  return localStorage.getItem(TOKEN_KEY) || localStorage.getItem(LEGACY_TOKEN_KEY) || '';
 }
 
-export function saveUser(user?: any) {
-  if (user) localStorage.setItem(USER_KEY, JSON.stringify(user));
+export function saveToken(token?: string) {
+  if (!token) return;
+  localStorage.setItem(TOKEN_KEY, token);
+  localStorage.setItem(LEGACY_TOKEN_KEY, token);
 }
 
 export function clearToken() {
   localStorage.removeItem(TOKEN_KEY);
-  localStorage.removeItem(USER_KEY);
-}
-
-export function getStoredToken() {
-  return localStorage.getItem(TOKEN_KEY);
+  localStorage.removeItem(LEGACY_TOKEN_KEY);
 }
 
 function authHeader(): Record<string, string> {
-  const token = localStorage.getItem(TOKEN_KEY);
+  const token = getToken();
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-function endpoint(path: string): string {
-  return `${API_BASE}${path}`;
+function withTokenQuery(url: string): string {
+  const token = getToken();
+  if (!token) return url;
+  const separator = url.includes('?') ? '&' : '?';
+  return `${url}${separator}token=${encodeURIComponent(token)}`;
 }
 
 export function fileUrl(key?: string | null): string {
   if (!key) return '#';
-  const token = localStorage.getItem(TOKEN_KEY);
-  const qs = token ? `?token=${encodeURIComponent(token)}` : '';
-  return `${API_BASE}/api/files/${encodeURIComponent(key)}${qs}`;
-}
-
-function friendlyNetworkError(error: any): Error {
-  const msg = String(error?.message || error || '');
-  if (msg.toLowerCase().includes('failed to fetch') || msg.toLowerCase().includes('load failed')) {
-    return new Error('No se pudo conectar con el API. Actualiza la página e intenta de nuevo. Si estás en celular, borra caché del sitio o vuelve a abrir la app.');
-  }
-  return error instanceof Error ? error : new Error(msg || 'Error de red');
+  return withTokenQuery(`${API_BASE}/api/files/${encodeURIComponent(key)}`);
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  try {
-    const res = await fetch(endpoint(path), {
-      ...options,
-      // We do not rely on cross-domain cookies. Authorization Bearer token is the primary session.
-      credentials: 'same-origin',
-      headers: options.body instanceof FormData
-        ? { ...authHeader(), ...(options.headers as any || {}) }
-        : { 'Content-Type': 'application/json', ...authHeader(), ...(options.headers || {}) },
-    });
+  const url = path.startsWith('http') ? path : `${API_BASE}${path.startsWith('/') ? path : `/${path}`}`;
+  const headers = new Headers(options.headers || {});
 
-    const contentType = res.headers.get('content-type') || '';
-    if (!res.ok) {
-      if (contentType.includes('application/json')) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || 'Error en la solicitud');
-      }
-      throw new Error(await res.text());
-    }
-
-    if (contentType.includes('application/json')) return (await res.json()) as T;
-    return (await res.text()) as T;
-  } catch (error: any) {
-    throw friendlyNetworkError(error);
+  if (!(options.body instanceof FormData) && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
   }
+
+  const token = getToken();
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      ...options,
+      headers,
+      credentials: 'omit',
+      mode: 'cors',
+    });
+  } catch (err: any) {
+    throw new Error(
+      'No se pudo conectar con el API. Revisa que el Worker esté desplegado, que VITE_API_BASE apunte a https://zoe-delivery-api.marco-cruz.workers.dev y que el celular no tenga una versión vieja instalada.'
+    );
+  }
+
+  const contentType = res.headers.get('content-type') || '';
+  const data = contentType.includes('application/json')
+    ? await res.json().catch(() => ({}))
+    : await res.text().catch(() => '');
+
+  if (!res.ok) {
+    const message = typeof data === 'string' ? data : data?.error || data?.message || 'Error en la solicitud';
+    throw new Error(message);
+  }
+
+  return data as T;
 }
 
 export const api = {
-  setup: async (body: any) => { const data: any = await request('/api/setup', { method: 'POST', body: JSON.stringify(body) }); saveToken(data.token); saveUser(data.user); return data; },
-  login: async (email: string, password: string) => { const data: any = await request('/api/auth/login', { method: 'POST', body: JSON.stringify({ email: String(email || '').trim().toLowerCase(), password: String(password || '').trim() }) }); saveToken(data.token); saveUser(data.user); return data; },
-  mobileAdminLogin: async (pin: string) => { const data: any = await request('/api/auth/mobile-admin', { method: 'POST', body: JSON.stringify({ email: 'marco.cruz@mackavi.com', pin }) }); saveToken(data.token); saveUser(data.user); return data; },
+  setup: async (body: any) => { const data: any = await request('/api/setup', { method: 'POST', body: JSON.stringify(body) }); saveToken(data.token); return data; },
+  login: async (email: string, password: string) => { const data: any = await request('/api/auth/login', { method: 'POST', body: JSON.stringify({ email: email.trim().toLowerCase(), password: password.trim() }) }); saveToken(data.token); return data; },
   logout: async () => { const data = await request('/api/auth/logout', { method: 'POST' }); clearToken(); return data; },
   me: () => request<{ user: any }>('/api/auth/me'),
   dashboard: () => request<any>('/api/dashboard'),
@@ -103,14 +94,16 @@ export const api = {
   startRoute: (id: string) => request(`/api/orders/${id}/start-route`, { method: 'POST' }),
   vehicleChecklists: (query = '') => request<{ checklists: any[] }>(`/api/vehicle-checklists${query}`),
   createVehicleChecklist: (form: FormData) => request('/api/vehicle-checklists', { method: 'POST', body: form }),
-  vehicleChecklistReportUrl: (month: string) => `${API_BASE}/api/reports/vehicle-checklists?month=${month}`,
+  vehicleChecklistReportUrl: (month: string) => withTokenQuery(`${API_BASE}/api/reports/vehicle-checklists?month=${encodeURIComponent(month)}`),
   inventoryProducts: (query = '') => request<{ products: any[] }>(`/api/inventory/products${query}`),
   createInventoryProduct: (body: any) => request('/api/inventory/products', { method: 'POST', body: JSON.stringify(body) }),
   updateInventoryProduct: (id: string, body: any) => request(`/api/inventory/products/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   updateInventoryStock: (id: string, body: any) => request(`/api/inventory/products/${id}/stock`, { method: 'POST', body: JSON.stringify(body) }),
   inventoryMovements: (query = '') => request<{ movements: any[] }>(`/api/inventory/movements${query}`),
-  inventoryReportUrl: () => `${API_BASE}/api/reports/inventory`,
+  inventoryReportUrl: () => withTokenQuery(`${API_BASE}/api/reports/inventory`),
   deliver: (id: string, form: FormData) => request(`/api/orders/${id}/deliver`, { method: 'POST', body: form }),
   reopen: (id: string, reason: string) => request(`/api/orders/${id}/reopen`, { method: 'POST', body: JSON.stringify({ reason }) }),
-  reportUrl: (month: string) => `${API_BASE}/api/reports/monthly?month=${month}`,
+  reportUrl: (month: string) => withTokenQuery(`${API_BASE}/api/reports/monthly?month=${encodeURIComponent(month)}`),
 };
+
+export { API_BASE };
