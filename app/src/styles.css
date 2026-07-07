@@ -705,3 +705,216 @@ button, .btn, .link-button { -webkit-tap-highlight-color: rgba(242,201,76,.25); 
   .bottom-nav { grid-template-columns: repeat(5, 1fr); }
 }
 @media (max-width: 820px) { .bottom-logout { flex: 1; display: grid; place-items: center; min-height: 44px; } }
+
+/* Nuevo formato de recibo de entrega Zoé / Mackavi basado en MTY/OUT */
+.zoe-proof-shipping {
+  position: relative;
+  width: min(100%, 920px);
+  min-height: 1180px;
+  background: #fff;
+  color: #1f2933;
+  border: 0;
+  border-radius: 0;
+  padding: 54px 56px 48px;
+  overflow: hidden;
+  font-family: "Geist", "Inter", "Aptos", "Segoe UI", Arial, sans-serif;
+  box-shadow: 0 28px 96px rgba(0,0,0,.38);
+}
+.zoe-proof-shipping .zoe-bg-corner {
+  position: absolute;
+  right: -80px;
+  top: -130px;
+  width: 520px;
+  height: 320px;
+  border-radius: 0 0 0 100%;
+  background: #f2f6ec;
+  z-index: 0;
+}
+.shipping-header,
+.shipping-address-row,
+.shipping-folio,
+.shipping-meta,
+.shipping-table-wrap,
+.shipping-signature-area,
+.shipping-footer { position: relative; z-index: 1; }
+.shipping-header {
+  display: grid;
+  grid-template-columns: 1fr 360px;
+  gap: 28px;
+  align-items: start;
+  min-height: 170px;
+}
+.shipping-logo-block { padding-top: 0; }
+.zoe-logo-text.shipping-logo { width: 150px; text-align:left; color:#82a83e; }
+.zoe-logo-text.shipping-logo strong {
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 62px;
+  letter-spacing: -.12em;
+  color: #87ad3e;
+  text-shadow: -28px 0 0 #4bb5d9;
+}
+.zoe-logo-text.shipping-logo span {
+  font-family: Arial, Helvetica, sans-serif;
+  display:block;
+  margin-left: 6px;
+  margin-top: 2px;
+  font-size: 12px;
+  letter-spacing: .48em;
+  color:#8ea7b5;
+}
+.issuer-block {
+  display: grid;
+  gap: 3px;
+  text-align: right;
+  font-size: 16px;
+  line-height: 1.18;
+  color: #28323a;
+}
+.issuer-block strong { font-size: 18px; font-weight: 560; letter-spacing: .01em; }
+.shipping-address-row {
+  display: grid;
+  grid-template-columns: 1fr 380px;
+  margin-top: 6px;
+  margin-bottom: 26px;
+}
+.shipping-address {
+  display: grid;
+  gap: 4px;
+  font-size: 15px;
+  line-height: 1.22;
+  color: #28323a;
+}
+.shipping-address strong { font-size: 16px; font-weight: 650; }
+.shipping-address .phone-line { margin-top: 4px; }
+.shipping-folio {
+  margin: 0 0 14px;
+  color: #90ad42;
+  font-size: 34px;
+  font-weight: 520;
+  letter-spacing: -.04em;
+}
+.shipping-meta {
+  border: 2px solid #4a7eaa;
+  border-radius: 10px;
+  display: grid;
+  grid-template-columns: 1fr 1.25fr 1fr;
+  margin-bottom: 48px;
+  overflow: hidden;
+  color:#28323a;
+}
+.shipping-meta div { padding: 12px 14px; }
+.shipping-meta span {
+  display:block;
+  color:#5d8db4;
+  font-size: 15px;
+  font-weight: 520;
+  margin-bottom: 6px;
+}
+.shipping-meta strong { font-size: 15px; font-weight: 480; color:#28323a; }
+.shipping-table-wrap { margin-top: 0; }
+.shipping-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  border: 1.6px solid #374151;
+  border-radius: 10px;
+  overflow: hidden;
+  color:#222b32;
+  background:#fff;
+  font-size: 15px;
+  line-height: 1.25;
+}
+.shipping-table th {
+  background: #92b33f;
+  color: white;
+  font-weight: 520;
+  letter-spacing: .01em;
+  padding: 12px 14px;
+  border-right: 1.3px solid rgba(255,255,255,.75);
+  text-align: left;
+}
+.shipping-table th:nth-child(2),
+.shipping-table th:nth-child(3) { text-align:center; width:150px; }
+.shipping-table td {
+  padding: 13px 14px;
+  border-top: 1.3px solid #6b7280;
+  border-right: 1.3px solid #6b7280;
+  vertical-align: top;
+}
+.shipping-table td:last-child, .shipping-table th:last-child { border-right:0; }
+.shipping-table td:nth-child(2),
+.shipping-table td:nth-child(3) { text-align:center; white-space:nowrap; }
+.shipping-table td strong { display:block; font-weight: 580; margin-bottom: 12px; }
+.shipping-table td span { display:block; margin-top: 4px; }
+.shipping-signature-area {
+  margin-top: 58px;
+  color:#29323a;
+}
+.shipping-signature-area p { margin:0 0 58px; font-size:15px; }
+.shipping-signature-grid {
+  display:grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 90px;
+  align-items:end;
+}
+.shipping-signature-line {
+  min-height: 86px;
+  border-top: 2px solid #111827;
+  display:flex;
+  flex-direction:column;
+  justify-content:flex-start;
+  align-items:center;
+  padding-top: 8px;
+  text-align:center;
+  position: relative;
+}
+.shipping-signature-line .zoe-signature-field {
+  position:absolute;
+  left:0;
+  right:0;
+  top:-110px;
+  min-height:110px;
+  display:grid;
+  place-items:center;
+}
+.shipping-signature-line .zoe-signature-field img { max-height: 104px; max-width: 310px; object-fit: contain; mix-blend-mode:multiply; }
+.shipping-signature-line .zoe-signature-field .signature-wrap {
+  width: 100%;
+  background:#fff !important;
+  border: 1px solid #d1d5db;
+  border-radius: 10px;
+  margin-bottom: 6px;
+}
+.shipping-signature-line strong { min-height: 20px; color:#111827; font-weight: 480; }
+.shipping-signature-line span { font-size: 14px; color:#303940; }
+.shipping-footer {
+  position:absolute;
+  left:56px;
+  right:56px;
+  bottom:28px;
+  display:grid;
+  gap: 20px;
+  text-align:center;
+  color:#555f66;
+  border-top: 1.4px solid #111827;
+  padding-top: 12px;
+}
+@media (max-width: 820px) {
+  .zoe-proof-shipping { padding: 28px 18px 32px; min-height: auto; }
+  .shipping-header { grid-template-columns: 1fr; min-height:auto; }
+  .issuer-block { text-align:left; }
+  .shipping-address-row { grid-template-columns: 1fr; }
+  .shipping-meta { grid-template-columns: 1fr; }
+  .shipping-table-wrap { overflow:auto; }
+  .shipping-signature-grid { grid-template-columns:1fr; gap:70px; }
+  .shipping-footer { position:relative; left:auto; right:auto; bottom:auto; margin-top:80px; }
+}
+@media print {
+  .zoe-proof-shipping { box-shadow:none; min-height: 100vh; padding: 38px 42px 36px; }
+  .zoe-proof-shipping .zoe-bg-corner { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .shipping-table th { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
+
+/* Editor de productos adaptado al nuevo recibo: PRODUCTO / ORDENADO / ENTREGADO */
+.item-row-editor { grid-template-columns: 110px 1fr 130px 92px; }
+@media (max-width: 820px) { .item-row-editor { grid-template-columns: 1fr; } }

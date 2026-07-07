@@ -44,7 +44,7 @@ const defaultDraft: Draft = {
 };
 
 const defaultItems: ItemDraft[] = [
-  { quantity: 1, description: 'Paquete(s) de 12 botellas Zoé Sport de 900ml', unit_price: 0, amount: 0 },
+  { quantity: 1, description: 'Waterbox Zoé Water 20 lts. (1pzas)', unit_price: 0, amount: 1 },
 ];
 
 function money(value: number) {
@@ -107,24 +107,30 @@ export default function NewOrder() {
   }
 
   function applyExtractedDraft(extracted: ExtractedOrderDraft, pdfKey: string) {
-    setDraft((current) => ({
-      ...current,
-      zoe_folio: extracted.zoe_folio || current.zoe_folio,
-      customer_company: extracted.customer_company || current.customer_company,
-      customer_name: extracted.customer_name || extracted.customer_contact_name || current.customer_name,
-      customer_contact_name: extracted.customer_contact_name || extracted.customer_name || current.customer_contact_name,
-      customer_phone: extracted.customer_phone || current.customer_phone,
-      customer_email: extracted.customer_email || current.customer_email,
-      customer_address: extracted.customer_address || current.customer_address,
-      delivery_reference: extracted.delivery_reference || current.delivery_reference,
-      payment_note: extracted.payment_note || current.payment_note,
-      original_pdf_key: pdfKey || current.original_pdf_key,
-    }));
+    const safe = (value?: string | null) => String(value || '').trim();
+    setDraft((current) => {
+      const orderDate = safe(extracted.order_date) || current.order_date;
+      return {
+        ...current,
+        zoe_folio: safe(extracted.zoe_folio) || current.zoe_folio,
+        order_date: orderDate,
+        scheduled_delivery_date: current.scheduled_delivery_date || orderDate,
+        customer_company: safe(extracted.customer_company) || current.customer_company,
+        customer_name: safe(extracted.customer_name) || safe(extracted.customer_contact_name) || current.customer_name,
+        customer_contact_name: safe(extracted.customer_contact_name) || safe(extracted.customer_name) || current.customer_contact_name,
+        customer_phone: safe(extracted.customer_phone) || current.customer_phone,
+        customer_email: safe(extracted.customer_email) || current.customer_email,
+        customer_address: safe(extracted.customer_address) || current.customer_address,
+        delivery_reference: safe(extracted.delivery_reference) || current.delivery_reference,
+        payment_note: safe(extracted.payment_note) || current.payment_note,
+        original_pdf_key: pdfKey || current.original_pdf_key,
+      };
+    });
 
     if (extracted.items && extracted.items.length) {
       setItems(extracted.items.map(itemFromApi));
     } else if (extracted.packages_expected) {
-      setItems([{ quantity: Number(extracted.packages_expected), description: 'Paquetes de producto Zoé Water', unit_price: 0, amount: 0 }]);
+      setItems([{ quantity: Number(extracted.packages_expected), description: 'Producto Zoé Water', unit_price: 0, amount: Number(extracted.packages_expected) }]);
     }
   }
 
@@ -231,31 +237,30 @@ export default function NewOrder() {
       </section>
 
       <form className="card form-grid" onSubmit={submit}>
-        <Field label="Folio / Pedido Zoé"><input value={draft.zoe_folio} onChange={(e) => patchDraft({ zoe_folio: e.target.value })} placeholder="Ej. 458650" required /></Field>
-        <Field label="Fecha orden"><input value={draft.order_date} onChange={(e) => patchDraft({ order_date: e.target.value })} type="date" /></Field>
+        <Field label="Folio / Recibo Zoé"><input value={draft.zoe_folio} onChange={(e) => patchDraft({ zoe_folio: e.target.value })} placeholder="Ej. MTY/OUT/00002" required /></Field>
+        <Field label="Fecha de envío"><input value={draft.order_date} onChange={(e) => patchDraft({ order_date: e.target.value })} type="date" /></Field>
         <Field label="Fecha programada"><input value={draft.scheduled_delivery_date} onChange={(e) => patchDraft({ scheduled_delivery_date: e.target.value })} type="date" required /></Field>
-        <Field label="Empresa"><input value={draft.customer_company} onChange={(e) => patchDraft({ customer_company: e.target.value })} placeholder="Ej. SPACE STUDIO" /></Field>
-        <Field label="Nombre / contacto"><input value={draft.customer_name} onChange={(e) => patchDraft({ customer_name: e.target.value, customer_contact_name: e.target.value })} placeholder="Ej. Rocio Murillo" required /></Field>
-        <Field label="Principal / teléfono"><input value={draft.customer_phone} onChange={(e) => patchDraft({ customer_phone: e.target.value })} placeholder="Ej. 8184657691" /></Field>
+        <Field label="Empresa emisora / cliente"><input value={draft.customer_company} onChange={(e) => patchDraft({ customer_company: e.target.value })} placeholder="Ej. SPACE STUDIO" /></Field>
+        <Field label="Destinatario / contacto"><input value={draft.customer_name} onChange={(e) => patchDraft({ customer_name: e.target.value, customer_contact_name: e.target.value })} placeholder="Ej. Rocio Murillo" required /></Field>
+        <Field label="Teléfono"><input value={draft.customer_phone} onChange={(e) => patchDraft({ customer_phone: e.target.value })} placeholder="Ej. 8184657691" /></Field>
         <Field label="Correo"><input value={draft.customer_email} onChange={(e) => patchDraft({ customer_email: e.target.value })} type="email" placeholder="correo@cliente.com" /></Field>
         <label className="field full"><span>Dirección de entrega</span><textarea value={draft.customer_address} onChange={(e) => patchDraft({ customer_address: e.target.value })} required rows={3} placeholder="Pega aquí la dirección tal como aparece en la orden" /></label>
-        <label className="field full"><span>Referencias</span><textarea value={draft.delivery_reference} onChange={(e) => patchDraft({ delivery_reference: e.target.value })} rows={2} placeholder="Ej. Lugar está en la esquina, es de color negro" /></label>
+        <label className="field full"><span>Notas / referencia</span><textarea value={draft.delivery_reference} onChange={(e) => patchDraft({ delivery_reference: e.target.value })} rows={2} placeholder="Ej. Lugar está en la esquina, es de color negro" /></label>
 
         <div className="full order-items-editor">
           <div className="section-head-inline">
-            <div><h3>Productos del pedido</h3><p>Estos renglones se usarán para reconstruir la tabla de la prueba de entrega.</p></div>
+            <div><h3>Productos del recibo</h3><p>Estos renglones se usarán para reconstruir la tabla PRODUCTO / ORDENADO / ENTREGADO.</p></div>
             <button className="btn" type="button" onClick={addItem}>Agregar producto</button>
           </div>
           {items.map((item, index) => (
             <div className="item-row-editor" key={index}>
-              <label><span>Cantidad</span><input type="number" min="0" step="1" value={item.quantity} onChange={(e) => updateItem(index, { quantity: Number(e.target.value) })} /></label>
-              <label className="item-description"><span>Descripción</span><input value={item.description} onChange={(e) => updateItem(index, { description: e.target.value })} /></label>
-              <label><span>Precio x unidad</span><input type="number" min="0" step="0.01" value={item.unit_price} onChange={(e) => updateItem(index, { unit_price: Number(e.target.value) })} /></label>
-              <label><span>Importe</span><input type="number" min="0" step="0.01" value={item.amount} onChange={(e) => updateItem(index, { amount: Number(e.target.value) })} /></label>
+              <label><span>Ordenado</span><input type="number" min="0" step="0.0001" value={item.quantity} onChange={(e) => updateItem(index, { quantity: Number(e.target.value) })} /></label>
+              <label className="item-description"><span>Producto</span><input value={item.description} onChange={(e) => updateItem(index, { description: e.target.value })} /></label>
+              <label><span>Entregado</span><input type="number" min="0" step="0.0001" value={item.amount} onChange={(e) => updateItem(index, { amount: Number(e.target.value) })} /></label>
               <button className="btn ghost" type="button" onClick={() => removeItem(index)}>Quitar</button>
             </div>
           ))}
-          <div className="order-total-preview"><span>Paquetes:</span><strong>{totalPackages}</strong><span>Total:</span><strong>{money(total)}</strong></div>
+          <div className="order-total-preview"><span>Ordenado:</span><strong>{totalPackages}</strong><span>Entregado:</span><strong>{total}</strong></div>
         </div>
 
         <Field label="Ruta"><select value={draft.route_id} onChange={(e) => patchDraft({ route_id: e.target.value })}><option value="">Sin ruta</option>{routes.map((r) => <option value={r.id} key={r.id}>{r.name}</option>)}</select></Field>

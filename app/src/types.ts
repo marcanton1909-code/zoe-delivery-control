@@ -59,6 +59,7 @@ export interface OrderItem {
 
 export interface ExtractedOrderDraft {
   zoe_folio?: string;
+  order_date?: string;
   customer_company?: string;
   customer_name?: string;
   customer_contact_name?: string;

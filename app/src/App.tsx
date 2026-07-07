@@ -5,6 +5,7 @@ import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Orders from './pages/Orders';
 import NewOrder from './pages/NewOrder';
+import EditOrder from './pages/EditOrder';
 import OrderDetail from './pages/OrderDetail';
 import ProofOfDelivery from './pages/ProofOfDelivery';
 import Warehouse from './pages/Warehouse';
@@ -84,8 +85,9 @@ export default function App() {
   let page = <Dashboard />;
   if (route === '/orders') page = <Orders onOpen={(id) => (location.hash = `#/orders/${id}`)} />;
   if (route === '/orders/new') page = <NewOrder />;
+  if (route.startsWith('/orders/') && route.endsWith('/edit')) page = <EditOrder id={route.split('/')[2]} />;
   if (route.startsWith('/orders/') && route.endsWith('/proof')) page = <ProofOfDelivery id={route.split('/')[2]} />;
-  else if (route.startsWith('/orders/') && route !== '/orders/new') page = <OrderDetail id={route.split('/')[2]} />;
+  else if (route.startsWith('/orders/') && route !== '/orders/new' && !route.endsWith('/edit')) page = <OrderDetail id={route.split('/')[2]} />;
   if (route === '/warehouse') page = <Warehouse />;
   if (route === '/driver') page = <Driver />;
   if (route === '/vehicle-checklist') page = <VehicleChecklist />;

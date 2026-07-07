@@ -51,6 +51,7 @@ export default function OrderDetail({ id }: { id: string }) {
           {order.original_pdf_key && <a className="btn" href={fileUrl(order.original_pdf_key)} target="_blank">Ver PDF original</a>}
           {order.signed_pdf_key && <a className="btn" href={fileUrl(order.signed_pdf_key)} target="_blank">Ver evidencia PDF</a>}
           <button className="btn" onClick={() => location.hash = `#/orders/${order.id}/proof`}>Ver prueba HTML</button>
+          {!['entregada','parcial','no_entregada','rechazada','cancelada'].includes(order.status) && <button className="btn" onClick={() => location.hash = `#/orders/${order.id}/edit`}>Editar datos</button>}
           {(order.status === 'programada' || order.status === 'cargada') && <button className="btn primary" onClick={startRoute}>Mandar a ruta</button>}
         </div>
       </section>

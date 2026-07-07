@@ -1009,7 +1009,20 @@ async function updateOrder(request: Request, env: Env): Promise<Response> {
   if (finalStatuses.includes(existing.status)) return json({ error: 'La orden ya está finalizada. Reábrela antes de editar.' }, 409);
 
   const body = await parseJson<Record<string, any>>(request);
+
+  if ('zoe_folio' in body) {
+    const nextFolio = String(body.zoe_folio || '').trim();
+    if (!nextFolio) return json({ error: 'El folio / recibo Zoé es obligatorio.' }, 400);
+    if (nextFolio !== existing.zoe_folio) {
+      const duplicate = await env.DB.prepare('SELECT id FROM orders WHERE zoe_folio = ? AND id <> ?')
+        .bind(nextFolio, id)
+        .first<{ id: string }>();
+      if (duplicate?.id) return json({ error: 'Ya existe otra orden registrada con este folio / recibo Zoé.' }, 409);
+    }
+  }
+
   const allowed = [
+    'zoe_folio',
     'order_date',
     'scheduled_delivery_date',
     'customer_company',
@@ -1036,11 +1049,59 @@ async function updateOrder(request: Request, env: Env): Promise<Response> {
       params.push(body[key] === '' ? null : body[key]);
     }
   }
-  if (!updates.length) return json({ error: 'No hay campos para actualizar' }, 400);
-  updates.push('updated_at = CURRENT_TIMESTAMP');
-  params.push(id);
-  await env.DB.prepare(`UPDATE orders SET ${updates.join(', ')} WHERE id = ?`).bind(...params).run();
-  await audit(env, actor.id, 'update_order', 'orders', id, JSON.stringify(body));
+
+  const itemsInput = Array.isArray(body.items) ? body.items : null;
+  const statements: any[] = [];
+
+  if (updates.length) {
+    updates.push('updated_at = CURRENT_TIMESTAMP');
+    params.push(id);
+    statements.push(env.DB.prepare(`UPDATE orders SET ${updates.join(', ')} WHERE id = ?`).bind(...params));
+  }
+
+  if (itemsInput) {
+    const cleanItems = itemsInput
+      .map((item: any, index: number) => ({
+        id: crypto.randomUUID(),
+        order_id: id,
+        quantity: Number(item.quantity || 0),
+        description: String(item.description || 'Producto Zoé Water').trim() || 'Producto Zoé Water',
+        unit_price: Number(item.unit_price || 0),
+        amount: Number(item.amount || 0),
+        sort_order: Number.isFinite(Number(item.sort_order)) ? Number(item.sort_order) : index,
+      }))
+      .filter((item: any) => item.quantity > 0 || item.description);
+
+    statements.push(env.DB.prepare('DELETE FROM order_items WHERE order_id = ?').bind(id));
+    for (const item of cleanItems) {
+      statements.push(env.DB.prepare(
+        'INSERT INTO order_items (id, order_id, quantity, description, unit_price, amount, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)'
+      ).bind(item.id, id, item.quantity, item.description, item.unit_price, item.amount, item.sort_order));
+    }
+  }
+
+  if (!statements.length) return json({ error: 'No hay campos para actualizar' }, 400);
+
+  await env.DB.batch(statements);
+
+  const fresh = await fetchOrder(env, id);
+  const customerId = await upsertCustomerFromOrder(env, {
+    company_name: cleanText(body.customer_company ?? fresh?.customer_company),
+    contact_name: cleanText(body.customer_contact_name ?? body.customer_name ?? fresh?.customer_contact_name ?? fresh?.customer_name),
+    phone: cleanText(body.customer_phone ?? fresh?.customer_phone),
+    email: cleanText(body.customer_email ?? fresh?.customer_email),
+    delivery_address: cleanText(body.customer_address ?? fresh?.customer_address),
+    delivery_references: cleanText(body.delivery_reference ?? fresh?.delivery_reference),
+    notes: cleanText(body.notes ?? fresh?.notes),
+  }, actor.id);
+
+  if (customerId) {
+    await env.DB.prepare(
+      'INSERT OR REPLACE INTO customer_orders (id, customer_id, order_id) VALUES (COALESCE((SELECT id FROM customer_orders WHERE order_id = ?), ?), ?, ?)'
+    ).bind(id, crypto.randomUUID(), customerId, id).run();
+  }
+
+  await audit(env, actor.id, 'update_order', 'orders', id, JSON.stringify({ ...body, items: itemsInput ? itemsInput.length : undefined }));
   return json({ ok: true, order: await fetchOrder(env, id) });
 }
 
