@@ -190,6 +190,7 @@ export default {
       else if (url.pathname === '/api/dashboard' && request.method === 'GET') response = await dashboard(request, env);
       else if (url.pathname === '/api/users' && request.method === 'GET') response = await listUsers(request, env);
       else if (url.pathname === '/api/users' && request.method === 'POST') response = await createUser(request, env);
+      else if (url.pathname.match(/^\/api\/users\/[^/]+$/) && request.method === 'PATCH') response = await updateUser(request, env);
       else if (url.pathname === '/api/customers' && request.method === 'GET') response = await listCustomers(request, env);
       else if (url.pathname.match(/^\/api\/customers\/[^/]+$/) && request.method === 'GET') response = await getCustomer(request, env);
       else if (url.pathname === '/api/routes' && request.method === 'GET') response = await listRoutes(request, env);
@@ -678,7 +679,7 @@ async function listUsers(request: Request, env: Env): Promise<Response> {
   const user = await requireRole(request, env, ['admin', 'coordinador', 'almacen', 'repartidor']);
   const url = new URL(request.url);
   const role = url.searchParams.get('role');
-  let sql = 'SELECT id, name, email, role, phone, active, created_at FROM users WHERE 1=1';
+  let sql = 'SELECT id, name, username, email, role, phone, active, created_at, updated_at FROM users WHERE 1=1';
   const params: string[] = [];
   if (role) {
     sql += ' AND role = ?';
@@ -695,7 +696,7 @@ async function listUsers(request: Request, env: Env): Promise<Response> {
 }
 
 async function createUser(request: Request, env: Env): Promise<Response> {
-  const actor = await requireRole(request, env, ['admin']);
+  const actor = await requireRole(request, env, ['admin', 'coordinador']);
   await ensureUsersUsernameColumn(env);
   const body = await parseJson<{ name: string; username?: string; email?: string; password: string; role: Role; phone?: string }>(request);
   requireString(body.name, 'name');
@@ -746,6 +747,92 @@ async function createUser(request: Request, env: Env): Promise<Response> {
 
   await audit(env, actor.id, 'create_user', 'users', id, JSON.stringify({ username, email, role: body.role }));
   return json({ ok: true, user: { id, name: body.name, username, email, role: body.role } }, 201);
+}
+
+async function updateUser(request: Request, env: Env): Promise<Response> {
+  const actor = await requireRole(request, env, ['admin', 'coordinador']);
+  await ensureUsersUsernameColumn(env);
+  const id = new URL(request.url).pathname.split('/').pop() || '';
+  if (!id) return json({ error: 'Usuario inválido' }, 400);
+
+  const current = await env.DB.prepare('SELECT id, name, username, email, role, phone, active FROM users WHERE id = ?')
+    .bind(id)
+    .first<any>();
+  if (!current) return json({ error: 'Usuario no encontrado' }, 404);
+
+  // Coordinador puede administrar usuarios operativos, pero no usuarios admin.
+  if (actor.role === 'coordinador' && current.role === 'admin') {
+    return json({ error: 'Solo un admin puede modificar usuarios admin.' }, 403);
+  }
+
+  const body = await parseJson<{ name?: string; username?: string; email?: string; password?: string; role?: Role; phone?: string; active?: number | boolean | string }>(request);
+
+  const name = cleanText(body.name) || current.name;
+  const role = (body.role || current.role) as Role;
+  if (!['admin', 'coordinador', 'almacen', 'repartidor'].includes(role)) return json({ error: 'Rol inválido' }, 400);
+  if (actor.role === 'coordinador' && role === 'admin') {
+    return json({ error: 'Solo un admin puede asignar el perfil admin.' }, 403);
+  }
+
+  const username = normalizeUsername(body.username || current.username || current.email || name);
+  if (!username) return json({ error: 'El usuario es obligatorio' }, 400);
+  if (!/^[a-z0-9._-]{3,40}$/.test(username)) {
+    return json({ error: 'El usuario solo puede usar minúsculas, números, punto, guion o guion bajo. Mínimo 3 caracteres.' }, 400);
+  }
+
+  const emailInput = body.email === undefined ? String(current.email || '') : String(body.email || '').trim().toLowerCase();
+  let email = emailInput;
+  const currentWasLocal = String(current.email || '').includes('@local.mackavi');
+  if (!email || currentWasLocal) email = `${username}@local.mackavi`;
+  if (email && !email.includes('@local.mackavi')) requireEmail(email);
+
+  const duplicate = await env.DB.prepare(
+    `SELECT id, username, email FROM users
+     WHERE id <> ? AND (LOWER(username) = LOWER(?) OR LOWER(email) = LOWER(?))
+     LIMIT 1`
+  ).bind(id, username, email).first<any>();
+  if (duplicate) return json({ error: 'Ya existe otro usuario con ese usuario o correo.', code: 'USER_EXISTS' }, 409);
+
+  const activeValue = body.active === undefined
+    ? Number(current.active ?? 1)
+    : (body.active === true || body.active === 1 || body.active === '1' || body.active === 'on' ? 1 : 0);
+
+  if (actor.id === id && activeValue === 0) {
+    return json({ error: 'No puedes desactivar tu propio usuario.' }, 400);
+  }
+
+  const phone = cleanText(body.phone);
+  const password = String(body.password || '').trim();
+
+  try {
+    if (password) {
+      requirePassword(password);
+      const hash = await hashPassword(password);
+      await env.DB.prepare(
+        `UPDATE users
+         SET name = ?, username = ?, email = ?, password_hash = ?, role = ?, phone = ?, active = ?, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`
+      ).bind(name, username, email, hash, role, phone, activeValue, id).run();
+    } else {
+      await env.DB.prepare(
+        `UPDATE users
+         SET name = ?, username = ?, email = ?, role = ?, phone = ?, active = ?, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`
+      ).bind(name, username, email, role, phone, activeValue, id).run();
+    }
+  } catch (err: any) {
+    const msg = String(err?.message || err || '');
+    if (msg.includes('UNIQUE constraint failed')) {
+      return json({ error: 'Ya existe otro usuario con ese usuario o correo.', code: 'USER_EXISTS' }, 409);
+    }
+    throw err;
+  }
+
+  const updated = await env.DB.prepare('SELECT id, name, username, email, role, phone, active, created_at, updated_at FROM users WHERE id = ?')
+    .bind(id)
+    .first<any>();
+  await audit(env, actor.id, 'update_user', 'users', id, JSON.stringify({ username, email, role, active: activeValue }));
+  return json({ ok: true, user: publicUser(updated) });
 }
 
 
@@ -2409,7 +2496,7 @@ function fuelLabel(value: string): string {
 }
 
 function publicUser(user: any): User {
-  return { id: user.id, name: user.name, username: user.username, email: user.email, role: user.role, active: user.active };
+  return { id: user.id, name: user.name, username: user.username, email: user.email, role: user.role, phone: user.phone, active: user.active } as any;
 }
 
 async function putR2(env: Env, key: string, file: File, contentType: string): Promise<string> {

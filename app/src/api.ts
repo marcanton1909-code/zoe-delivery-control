@@ -80,6 +80,7 @@ export const api = {
   dashboard: () => request<any>('/api/dashboard'),
   users: (role?: string) => request<{ users: any[] }>(`/api/users${role ? `?role=${role}` : ''}`),
   createUser: (body: any) => request('/api/users', { method: 'POST', body: JSON.stringify(body) }),
+  updateUser: (id: string, body: any) => request(`/api/users/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
 
   customers: (query = '') => request<{ customers: any[] }>(`/api/customers${query}`),
   customer: (id: string) => request<{ customer: any; orders: any[] }>(`/api/customers/${id}`),

@@ -1,3 +1,0 @@
-# Para dev local. Copia este archivo como .dev.vars
-RESEND_API_KEY=
-JWT_SECRET=cambia_esto_por_un_secreto_largo
