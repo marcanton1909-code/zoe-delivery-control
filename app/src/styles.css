@@ -1011,3 +1011,6 @@ button, .btn, .link-button { -webkit-tap-highlight-color: rgba(242,201,76,.25); 
     border-radius: 999px !important;
   }
 }
+
+.btn.tiny { padding: 7px 10px; border-radius: 10px; font-size: 12px; min-height: 34px; }
+.actions-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }

@@ -68,7 +68,7 @@ export default function App() {
       { href: '#/customers', label: 'Clientes', roles: ['admin','coordinador','almacen'] },
       { href: '#/driver', label: 'Repartidor', roles: ['admin','coordinador','repartidor'] },
       { href: '#/reports', label: 'Reportes', roles: ['admin','coordinador'] },
-      { href: '#/settings', label: 'Config.', roles: ['admin'] },
+      { href: '#/settings', label: 'Config.', roles: ['admin','coordinador'] },
     ];
     return [...base, ...ops].filter((n) => n.roles.includes(user.role));
   }, [user]);
