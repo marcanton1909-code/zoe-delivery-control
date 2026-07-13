@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#10b981"/><stop offset="1" stop-color="#0f766e"/></linearGradient></defs>
+  <rect width="128" height="128" rx="34" fill="#052e2b"/>
+  <path d="M26 76c21-2 21-31 38-31s18 29 38 31" fill="none" stroke="url(#g)" stroke-width="12" stroke-linecap="round"/>
+  <text x="64" y="92" text-anchor="middle" font-family="Arial, sans-serif" font-size="30" font-weight="900" fill="white">MW</text>
+</svg>
