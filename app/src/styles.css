@@ -1014,3 +1014,384 @@ button, .btn, .link-button { -webkit-tap-highlight-color: rgba(242,201,76,.25); 
 
 .btn.tiny { padding: 7px 10px; border-radius: 10px; font-size: 12px; min-height: 34px; }
 .actions-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+
+
+/* ===== MACKAVI LA BRU START ===== */
+
+.la-bru-launcher {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  margin: 0 0 22px;
+  padding: 18px 20px;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.10);
+  border-radius: 24px;
+  background:
+    linear-gradient(
+      110deg,
+      rgba(255,255,255,.045),
+      rgba(255,255,255,.015)
+    ),
+    #0b0a09;
+  box-shadow: var(--shadow-soft);
+}
+
+.la-bru-launcher::after {
+  content: "";
+  position: absolute;
+  width: 180px;
+  height: 180px;
+  top: -105px;
+  right: -105px;
+  border-radius: 50%;
+  background: rgba(242,201,76,.07);
+  pointer-events: none;
+}
+
+.la-bru-launcher-mark,
+.la-bru-modal-mark,
+.la-bru-product-mark {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  flex: 0 0 auto;
+  border: 1px solid rgba(242,201,76,.26);
+  border-radius: 16px;
+  background: #11100e;
+  color: var(--gold);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: .08em;
+}
+
+.la-bru-launcher-copy > span {
+  display: block;
+  margin-bottom: 3px;
+  color: #a99d84;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .075em;
+  text-transform: uppercase;
+}
+
+.la-bru-launcher-copy h3 {
+  margin: 0;
+  color: var(--cream);
+  font-size: 19px;
+  font-weight: 560;
+  letter-spacing: -.025em;
+}
+
+.la-bru-launcher-copy p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.la-bru-launcher-button {
+  position: relative;
+  z-index: 2;
+  min-height: 44px;
+  padding: 0 15px;
+  border: 1px solid rgba(242,201,76,.22);
+  border-radius: 14px;
+  background: transparent;
+  color: var(--cream);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  cursor: pointer;
+  font-weight: 560;
+  transition:
+    background .16s ease,
+    border-color .16s ease,
+    transform .16s ease;
+}
+
+.la-bru-launcher-button:hover {
+  background: rgba(242,201,76,.07);
+  border-color: rgba(242,201,76,.38);
+  transform: translateY(-1px);
+}
+
+
+/* MODAL */
+
+.la-bru-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  padding: 24px;
+  display: grid;
+  place-items: center;
+  background: rgba(0,0,0,.76);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.la-bru-modal {
+  position: relative;
+  width: min(100%, 410px);
+  padding: 30px;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 28px;
+  background: #0c0b0a;
+  box-shadow: 0 34px 110px rgba(0,0,0,.62);
+}
+
+.la-bru-modal-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border: 1px solid rgba(255,255,255,.10);
+  border-radius: 50%;
+  background: transparent;
+  color: #b8ae9c;
+  cursor: pointer;
+  font-size: 24px;
+  line-height: 1;
+}
+
+.la-bru-modal-mark {
+  margin-bottom: 22px;
+}
+
+.la-bru-modal-kicker {
+  color: var(--gold);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: .10em;
+  text-transform: uppercase;
+}
+
+.la-bru-modal h2 {
+  margin: 8px 0;
+  color: var(--cream);
+  font-size: 27px;
+  font-weight: 560;
+  letter-spacing: -.035em;
+}
+
+.la-bru-modal > p {
+  margin: 0 0 22px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.la-bru-code-field {
+  display: grid;
+  gap: 8px;
+  color: #bdb29d;
+  font-size: 12px;
+  font-weight: 560;
+}
+
+.la-bru-code-field input {
+  min-height: 58px;
+  padding-left: calc(14px + .34em);
+  border-radius: 16px;
+  background: #070706;
+  text-align: center;
+  font-size: 25px;
+  letter-spacing: .34em;
+}
+
+.la-bru-modal-error {
+  margin-top: 10px;
+  color: #ff8f8f;
+  font-size: 12px;
+}
+
+.la-bru-modal-submit {
+  width: 100%;
+  min-height: 50px;
+  margin-top: 16px;
+  border: 0;
+  border-radius: 15px;
+  background: var(--cream);
+  color: #11100e;
+  cursor: pointer;
+  font-weight: 650;
+}
+
+.la-bru-modal-submit:disabled {
+  opacity: .65;
+  cursor: wait;
+}
+
+
+/* SaaS */
+
+.la-bru-page {
+  padding-bottom: 30px;
+}
+
+.la-bru-main-hero {
+  min-height: 310px;
+  padding: clamp(26px, 5vw, 54px);
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 30px;
+  border: 1px solid rgba(255,255,255,.10);
+  border-radius: 34px;
+  background:
+    radial-gradient(
+      circle at 86% 15%,
+      rgba(242,201,76,.11),
+      transparent 28%
+    ),
+    linear-gradient(135deg, #080706, #15110b);
+  box-shadow: var(--shadow);
+}
+
+.la-bru-main-hero h1 {
+  margin: 5px 0 10px;
+  color: var(--cream);
+  font-size: clamp(38px, 7vw, 72px);
+  font-weight: 520;
+  line-height: .96;
+  letter-spacing: -.055em;
+}
+
+.la-bru-main-hero p {
+  max-width: 620px;
+  margin: 0;
+  color: #a99f8d;
+  line-height: 1.55;
+}
+
+.la-bru-product-mark.large {
+  width: 96px;
+  height: 96px;
+  border-radius: 28px;
+  font-size: 22px;
+}
+
+.la-bru-ready-card,
+.la-bru-locked {
+  margin-top: 20px;
+  padding: clamp(22px, 4vw, 34px);
+  border: 1px solid rgba(255,255,255,.09);
+  border-radius: 26px;
+  background: rgba(255,255,255,.025);
+}
+
+.la-bru-access-ok {
+  display: inline-flex;
+  padding: 7px 10px;
+  border: 1px solid rgba(34,197,94,.18);
+  border-radius: 999px;
+  background: rgba(34,197,94,.08);
+  color: #9ee9b3;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.la-bru-ready-card h2,
+.la-bru-locked h2 {
+  margin: 18px 0 8px;
+  color: var(--cream);
+  font-size: clamp(25px, 4vw, 38px);
+  font-weight: 540;
+  letter-spacing: -.035em;
+}
+
+.la-bru-ready-card p,
+.la-bru-locked p {
+  max-width: 700px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.la-bru-ready-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 18px;
+}
+
+.la-bru-locked {
+  text-align: center;
+}
+
+.la-bru-locked .la-bru-product-mark {
+  margin: 0 auto 18px;
+}
+
+
+/* TABLET / IPAD */
+
+@media (min-width: 761px) and (max-width: 1180px) {
+
+  .la-bru-launcher {
+    padding: 18px;
+  }
+
+  .la-bru-main-hero {
+    min-height: 290px;
+  }
+
+}
+
+
+/* CELULAR */
+
+@media (max-width: 760px) {
+
+  .la-bru-launcher {
+    grid-template-columns: auto minmax(0, 1fr);
+    padding: 16px;
+  }
+
+  .la-bru-launcher-button {
+    grid-column: 1 / -1;
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .la-bru-modal-backdrop {
+    padding: 14px;
+  }
+
+  .la-bru-modal {
+    padding: 24px 20px 20px;
+    border-radius: 24px;
+  }
+
+  .la-bru-main-hero {
+    min-height: 280px;
+    flex-direction: column-reverse;
+    align-items: flex-start;
+    justify-content: flex-end;
+  }
+
+  .la-bru-product-mark.large {
+    width: 72px;
+    height: 72px;
+    border-radius: 22px;
+    font-size: 18px;
+  }
+
+  .la-bru-ready-actions {
+    display: grid;
+  }
+
+  .la-bru-ready-actions .btn {
+    width: 100%;
+  }
+
+}
+
+/* ===== MACKAVI LA BRU END ===== */
+

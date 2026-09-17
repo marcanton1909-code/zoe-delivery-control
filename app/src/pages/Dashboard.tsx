@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
+import LaBruLauncher from '../components/LaBruLauncher';
 
 export default function Dashboard() {
   const [data, setData] = useState<any>(null);
@@ -42,6 +43,8 @@ export default function Dashboard() {
           <div className="route-tile"><span>Órdenes en ruta</span><strong>{statusMap.en_ruta || 0}</strong></div>
         </div>
       </section>
+
+      <LaBruLauncher />
 
       <div className="metric-grid">
         {cards.map(([label, value]) => (

@@ -16,6 +16,7 @@ import VehicleChecklist from './pages/VehicleChecklist';
 import Inventory from './pages/Inventory';
 import Customers from './pages/Customers';
 import Settings from './pages/Settings';
+import LaBru from './pages/LaBru';
 
 function getHash() {
   return location.hash.replace('#', '') || '/dashboard';
@@ -96,6 +97,7 @@ export default function App() {
   if (route.startsWith('/driver/orders/')) page = <DriverOrder id={route.split('/')[3]} />;
   if (route === '/reports') page = <Reports />;
   if (route === '/settings') page = <Settings />;
+  if (route === '/la-bru') page = <LaBru />;
 
   return (
     <div className="app-shell">
