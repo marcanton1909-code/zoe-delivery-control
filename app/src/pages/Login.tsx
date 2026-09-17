@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { api } from '../api';
 import Field from '../components/Field';
+import LaBruEntry from '../components/LaBruEntry';
 
 export default function Login({ onLoggedIn }: { onLoggedIn: () => void }) {
   const [loginId, setLoginId] = useState('marco.cruz@mackavi.com');
@@ -55,6 +56,8 @@ export default function Login({ onLoggedIn }: { onLoggedIn: () => void }) {
           <button className="btn" type="button" disabled={loading} onClick={repairAdmin}>Crear / reparar administrador</button>
         </div>
       </form>
+
+        <LaBruEntry />
     </div>
   );
 }
