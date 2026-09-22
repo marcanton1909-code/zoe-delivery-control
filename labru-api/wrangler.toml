@@ -1,0 +1,15 @@
+name = "mackavi-la-bru-api"
+main = "src/index.ts"
+compatibility_date = "2026-09-22"
+
+[vars]
+LABRU_PIN = "0820"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "zoe-delivery-db"
+database_id = "3e6bef6e-9e61-4bb4-8ac5-845a28c5f898"
+
+[[r2_buckets]]
+binding = "FILES"
+bucket_name = "mackavi-la-bru-files"
