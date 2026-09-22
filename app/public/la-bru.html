@@ -1144,6 +1144,130 @@ input:focus,select:focus,textarea:focus{
 
 /* === LABRU OPS V2 CSS END === */
 
+
+/* === LABRU V3 START === */
+
+.inventory-edit-button{
+  min-height:32px;
+  padding:0 10px;
+  border:1px solid var(--line2);
+  border-radius:9px;
+  background:transparent;
+  color:var(--gold2);
+  font-size:10px;
+}
+
+.reconcile-box{
+  margin-top:14px;
+  padding:14px;
+  border:1px solid var(--line);
+  border-radius:13px;
+  background:#0a0a09;
+}
+
+.reconcile-box strong{
+  display:block;
+  margin-bottom:7px;
+  font-size:12px;
+}
+
+.reconcile-grid{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:8px;
+}
+
+.reconcile-item{
+  padding:10px;
+  border:1px solid #22211c;
+  border-radius:10px;
+}
+
+.reconcile-item span{
+  display:block;
+  color:#70695d;
+  font-size:9px;
+  margin-bottom:4px;
+}
+
+.reconcile-item b{
+  font-size:13px;
+  font-weight:600;
+}
+
+.document-reading{
+  display:none;
+  margin-top:7px;
+  color:var(--gold2);
+  font-size:10px;
+}
+
+.document-reading.active{
+  display:block;
+}
+
+.sales-tax-box{
+  margin-top:14px;
+  padding:14px 16px;
+  border:1px solid rgba(215,170,85,.16);
+  border-radius:14px;
+  background:#11100d;
+}
+
+.sales-tax-row{
+  display:flex;
+  justify-content:space-between;
+  gap:20px;
+  padding:5px 0;
+  color:#8e8678;
+  font-size:11px;
+}
+
+.sales-tax-row strong{
+  color:#d5cdbf;
+  font-weight:570;
+}
+
+.sales-tax-row.total{
+  margin-top:5px;
+  padding-top:10px;
+  border-top:1px solid var(--line);
+}
+
+.sales-tax-row.total strong{
+  color:var(--text);
+  font-size:18px;
+}
+
+.invoice-autofill-note{
+  margin-top:6px;
+  color:#746d61;
+  font-size:10px;
+  line-height:1.5;
+}
+
+.inventory-clickable{
+  cursor:pointer;
+}
+
+.inventory-clickable:hover{
+  background:#13120f;
+}
+
+.metric-highlight{
+  border-color:rgba(215,170,85,.18);
+}
+
+@media(max-width:760px){
+
+  .reconcile-grid{
+    grid-template-columns:1fr;
+  }
+
+}
+
+/* === LABRU V3 END === */
+
 </style>
 </head>
 
@@ -4771,6 +4895,3544 @@ renderSales();
 renderReports();
 
 </script>
+
+
+<!-- === LABRU V3 JS START === -->
+
+<script>
+
+const SALE_IVA_V3 = 0.16;
+
+
+/* ========================================================
+   UTILIDADES
+======================================================== */
+
+function v3Num(value){
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+
+function v3Normalize(value){
+
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g,'')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g,' ')
+    .trim();
+}
+
+
+function v3Date(value){
+
+  if(!value)return '';
+
+  const match =
+    String(value).match(
+      /(20\d{2})[-\/](\d{1,2})[-\/](\d{1,2})/
+    );
+
+  if(!match)return '';
+
+  return (
+    match[1] +
+    '-' +
+    String(match[2]).padStart(2,'0') +
+    '-' +
+    String(match[3]).padStart(2,'0')
+  );
+}
+
+
+/* ========================================================
+   INVENTARIO AUTORITATIVO POR MOVIMIENTOS
+======================================================== */
+
+function v3EntriesFor(productId,type){
+
+  if(typeof entryRecords === 'undefined'){
+    return 0;
+  }
+
+  return entryRecords
+    .filter(item =>
+      item.productId === productId
+      &&
+      item.inventoryType === type
+    )
+    .reduce(
+      (sum,item) =>
+        sum + v3Num(item.quantity),
+      0
+    );
+}
+
+
+function v3OutputsFor(productId,type){
+
+  if(typeof outputs === 'undefined'){
+    return 0;
+  }
+
+  return outputs
+    .filter(item =>
+      item.productId === productId
+      &&
+      item.inventoryType === type
+    )
+    .reduce(
+      (sum,item) =>
+        sum + v3Num(item.quantity),
+      0
+    );
+}
+
+
+function v3Stock(product){
+
+  const sale =
+    v3Num(product.openingSale)
+    +
+    v3EntriesFor(product.id,'sale')
+    -
+    v3OutputsFor(product.id,'sale');
+
+  const free =
+    v3Num(product.openingFree)
+    +
+    v3EntriesFor(product.id,'free')
+    -
+    v3OutputsFor(product.id,'free');
+
+  return {
+    sale:Math.max(0,sale),
+    free:Math.max(0,free),
+    rawSale:sale,
+    rawFree:free
+  };
+}
+
+
+function v3MigrateInventory(){
+
+  let changed=false;
+
+  for(const product of products){
+
+    if(product.openingSale === undefined){
+
+      /*
+        Reconstruye el saldo inicial necesario para que
+        el inventario mostrado AHORA no cambie al instalar V3.
+
+        Después el usuario puede hacer una única conciliación
+        para corregir el inventario histórico.
+      */
+
+      const currentSale =
+        v3Num(product.stockSale ?? product.stock);
+
+      const currentFree =
+        v3Num(product.stockFree);
+
+      const entriesSale =
+        v3EntriesFor(product.id,'sale');
+
+      const entriesFree =
+        v3EntriesFor(product.id,'free');
+
+      const outputsSale =
+        v3OutputsFor(product.id,'sale');
+
+      const outputsFree =
+        v3OutputsFor(product.id,'free');
+
+      product.openingSale =
+        currentSale
+        - entriesSale
+        + outputsSale;
+
+      product.openingFree =
+        currentFree
+        - entriesFree
+        + outputsFree;
+
+      /*
+        Producto existente:
+        permite UNA corrección libre.
+      */
+      product.inventoryReconciled=false;
+
+      changed=true;
+    }
+  }
+
+  if(changed){
+
+    localStorage.setItem(
+      productKey,
+      JSON.stringify(products)
+    );
+  }
+
+  v3SyncAllStocks();
+}
+
+
+function v3SyncAllStocks(){
+
+  for(const product of products){
+
+    const stock =
+      v3Stock(product);
+
+    product.stockSale =
+      stock.sale;
+
+    product.stockFree =
+      stock.free;
+  }
+
+  localStorage.setItem(
+    productKey,
+    JSON.stringify(products)
+  );
+}
+
+
+/* ========================================================
+   INVENTARIO · MODAL DE EDICIÓN
+======================================================== */
+
+function v3EnsureInventoryModal(){
+
+  if(document.getElementById('inventoryEditModal')){
+    return;
+  }
+
+  const html = `
+
+  <div
+    class="modal-wrap hidden"
+    id="inventoryEditModal"
+  >
+
+    <div class="modal">
+
+      <div class="modal-head">
+
+        <div>
+          <div class="eyebrow">
+            Conciliación
+          </div>
+
+          <h2 id="inventoryEditTitle">
+            Editar inventario
+          </h2>
+        </div>
+
+        <button
+          class="btn subtle"
+          onclick="v3CloseInventoryEdit()"
+        >
+          Cerrar
+        </button>
+
+      </div>
+
+
+      <input
+        type="hidden"
+        id="inventoryEditProductId"
+      >
+
+
+      <div class="form-grid">
+
+        <div class="field">
+
+          <label>
+            Inventario para venta
+          </label>
+
+          <input
+            id="inventoryEditSale"
+            type="number"
+            min="0"
+          >
+
+        </div>
+
+
+        <div class="field">
+
+          <label>
+            Inventario sin cargo
+          </label>
+
+          <input
+            id="inventoryEditFree"
+            type="number"
+            min="0"
+          >
+
+        </div>
+
+      </div>
+
+
+      <div
+        class="reconcile-box"
+        id="inventoryReconcileInfo"
+      ></div>
+
+
+      <div class="modal-actions">
+
+        <button
+          class="btn subtle"
+          onclick="v3CloseInventoryEdit()"
+        >
+          Cancelar
+        </button>
+
+        <button
+          class="btn primary"
+          onclick="v3SaveInventoryEdit()"
+        >
+          Guardar ajuste
+        </button>
+
+      </div>
+
+    </div>
+
+  </div>
+  `;
+
+  document.body.insertAdjacentHTML(
+    'beforeend',
+    html
+  );
+}
+
+
+function v3OpenInventoryEdit(productId){
+
+  const product =
+    products.find(
+      item=>item.id===productId
+    );
+
+  if(!product)return;
+
+  const stock =
+    v3Stock(product);
+
+  document.getElementById(
+    'inventoryEditProductId'
+  ).value = product.id;
+
+  document.getElementById(
+    'inventoryEditTitle'
+  ).textContent =
+    product.name;
+
+  document.getElementById(
+    'inventoryEditSale'
+  ).value =
+    stock.sale;
+
+  document.getElementById(
+    'inventoryEditFree'
+  ).value =
+    stock.free;
+
+
+  const entriesSale =
+    v3EntriesFor(product.id,'sale');
+
+  const entriesFree =
+    v3EntriesFor(product.id,'free');
+
+  const outputsSale =
+    v3OutputsFor(product.id,'sale');
+
+  const outputsFree =
+    v3OutputsFor(product.id,'free');
+
+
+  const firstCorrection =
+    product.inventoryReconciled !== true;
+
+
+  document.getElementById(
+    'inventoryReconcileInfo'
+  ).innerHTML = `
+
+    <strong>
+      ${
+        firstCorrection
+        ?
+        'Primera conciliación disponible'
+        :
+        'Inventario controlado por movimientos'
+      }
+    </strong>
+
+    <div class="reconcile-grid">
+
+      <div class="reconcile-item">
+        <span>Entradas · venta</span>
+        <b>${entriesSale}</b>
+      </div>
+
+      <div class="reconcile-item">
+        <span>Salidas · venta</span>
+        <b>${outputsSale}</b>
+      </div>
+
+      <div class="reconcile-item">
+        <span>Entradas · sin cargo</span>
+        <b>${entriesFree}</b>
+      </div>
+
+      <div class="reconcile-item">
+        <span>Salidas · sin cargo</span>
+        <b>${outputsFree}</b>
+      </div>
+
+    </div>
+
+    <div style="
+      margin-top:10px;
+      color:#777064;
+      font-size:10px;
+      line-height:1.5;
+    ">
+
+      ${
+        firstCorrection
+        ?
+        `Puedes corregir libremente esta vez para conciliar
+        el inventario histórico. Después de guardar, ningún
+        aumento manual será permitido sin una entrada respaldada.`
+        :
+        `Los aumentos manuales están bloqueados.
+        Para incrementar existencia debe existir una compra /
+        entrada. Las reducciones manuales se registrarán como
+        ajuste de inventario.`
+      }
+
+    </div>
+  `;
+
+
+  document
+    .getElementById('inventoryEditModal')
+    .classList.remove('hidden');
+}
+
+
+function v3CloseInventoryEdit(){
+
+  document
+    .getElementById('inventoryEditModal')
+    .classList.add('hidden');
+}
+
+
+function v3SaveInventoryEdit(){
+
+  const productId =
+    document.getElementById(
+      'inventoryEditProductId'
+    ).value;
+
+  const product =
+    products.find(
+      item=>item.id===productId
+    );
+
+  if(!product)return;
+
+
+  const desiredSale =
+    v3Num(
+      document.getElementById(
+        'inventoryEditSale'
+      ).value
+    );
+
+  const desiredFree =
+    v3Num(
+      document.getElementById(
+        'inventoryEditFree'
+      ).value
+    );
+
+
+  if(desiredSale < 0 || desiredFree < 0){
+
+    alert(
+      'El inventario no puede ser negativo.'
+    );
+
+    return;
+  }
+
+
+  const current =
+    v3Stock(product);
+
+
+  if(product.inventoryReconciled !== true){
+
+    /*
+      ÚNICA CORRECCIÓN LIBRE.
+
+      Ajustamos el saldo inicial necesario para que:
+      apertura + entradas - salidas = cantidad deseada.
+    */
+
+    product.openingSale =
+      desiredSale
+      -
+      v3EntriesFor(product.id,'sale')
+      +
+      v3OutputsFor(product.id,'sale');
+
+
+    product.openingFree =
+      desiredFree
+      -
+      v3EntriesFor(product.id,'free')
+      +
+      v3OutputsFor(product.id,'free');
+
+
+    product.inventoryReconciled=true;
+
+  } else {
+
+    /*
+      DESPUÉS DE CONCILIAR:
+      NO SE PUEDE AUMENTAR MANUALMENTE.
+    */
+
+    if(
+      desiredSale > current.sale
+      ||
+      desiredFree > current.free
+    ){
+
+      alert(
+        'No es posible aumentar el inventario manualmente.\n\n'
+        +
+        'El aumento debe provenir de una compra / entrada '
+        +
+        'registrada para poder cotejarlo.'
+      );
+
+      return;
+    }
+
+
+    /*
+      Una reducción manual sí puede hacerse,
+      pero queda registrada como SALIDA DE AJUSTE.
+    */
+
+    const saleDifference =
+      current.sale - desiredSale;
+
+    const freeDifference =
+      current.free - desiredFree;
+
+
+    if(saleDifference > 0){
+
+      outputs.unshift({
+
+        id:crypto.randomUUID(),
+
+        productId:product.id,
+
+        productName:product.name,
+
+        inventoryType:'sale',
+
+        quantity:saleDifference,
+
+        reason:'Ajuste validado de inventario',
+
+        date:new Date()
+          .toISOString()
+          .slice(0,10),
+
+        destination:'Conciliación manual',
+
+        notes:
+          'Reducción manual registrada después de conciliación.',
+
+        createdAt:
+          new Date().toISOString()
+      });
+    }
+
+
+    if(freeDifference > 0){
+
+      outputs.unshift({
+
+        id:crypto.randomUUID(),
+
+        productId:product.id,
+
+        productName:product.name,
+
+        inventoryType:'free',
+
+        quantity:freeDifference,
+
+        reason:'Ajuste validado de inventario',
+
+        date:new Date()
+          .toISOString()
+          .slice(0,10),
+
+        destination:'Conciliación manual',
+
+        notes:
+          'Reducción manual registrada después de conciliación.',
+
+        createdAt:
+          new Date().toISOString()
+      });
+    }
+
+
+    localStorage.setItem(
+      outputKey,
+      JSON.stringify(outputs)
+    );
+  }
+
+
+  localStorage.setItem(
+    productKey,
+    JSON.stringify(products)
+  );
+
+
+  v3SyncAllStocks();
+
+  v3CloseInventoryEdit();
+
+  renderAll();
+
+  setView('inventory');
+}
+
+
+/* ========================================================
+   PRODUCTOS NUEVOS · CREAR SALDO INICIAL CONTROLADO
+======================================================== */
+
+const v3OriginalSaveProduct =
+  typeof saveProduct === 'function'
+  ? saveProduct
+  : null;
+
+
+if(v3OriginalSaveProduct){
+
+  saveProduct = function(){
+
+    const beforeIds =
+      new Set(
+        products.map(p=>p.id)
+      );
+
+    v3OriginalSaveProduct();
+
+    const newProduct =
+      products.find(
+        product =>
+          !beforeIds.has(product.id)
+      );
+
+    if(newProduct){
+
+      /*
+        En productos creados DESPUÉS de V3,
+        el inventario inicial es un saldo de apertura válido.
+      */
+
+      newProduct.openingSale =
+        v3Num(newProduct.stockSale);
+
+      newProduct.openingFree =
+        v3Num(newProduct.stockFree);
+
+      newProduct.inventoryReconciled=true;
+
+      localStorage.setItem(
+        productKey,
+        JSON.stringify(products)
+      );
+    }
+
+    v3SyncAllStocks();
+
+    renderAll();
+  };
+}
+
+
+/* ========================================================
+   COMPRAS / SALIDAS EXISTENTES
+   SINCRONIZAR SIEMPRE CONTRA MOVIMIENTOS
+======================================================== */
+
+if(typeof savePurchase === 'function'){
+
+  const v3OriginalSavePurchase =
+    savePurchase;
+
+  savePurchase = async function(){
+
+    await v3OriginalSavePurchase();
+
+    v3SyncAllStocks();
+
+    renderAll();
+  };
+}
+
+
+if(typeof saveOutput === 'function'){
+
+  const v3OriginalSaveOutput =
+    saveOutput;
+
+  saveOutput = function(){
+
+    v3OriginalSaveOutput();
+
+    v3SyncAllStocks();
+
+    renderAll();
+  };
+}
+
+
+/* ========================================================
+   RFC EN CLIENTES
+======================================================== */
+
+function v3EnsureClientRFC(){
+
+  const company =
+    document.getElementById('cCompany');
+
+  if(
+    !company
+    ||
+    document.getElementById('cRFC')
+  ){
+    return;
+  }
+
+  const field =
+    company.closest('.field');
+
+  field.insertAdjacentHTML(
+    'afterend',
+    `
+
+    <div class="field">
+
+      <label>
+        RFC *
+      </label>
+
+      <input
+        id="cRFC"
+        maxlength="13"
+        placeholder="RFC del cliente"
+        style="text-transform:uppercase"
+      >
+
+    </div>
+
+    `
+  );
+}
+
+
+function v3ClientRFCValue(){
+
+  return (
+    document.getElementById('cRFC')
+      ?.value
+      ?.trim()
+      ?.toUpperCase()
+    ||
+    ''
+  );
+}
+
+
+saveClient = function(){
+
+  const company =
+    document.getElementById(
+      'cCompany'
+    ).value.trim();
+
+  const rfc =
+    v3ClientRFCValue();
+
+
+  if(!company){
+
+    alert(
+      'Captura el nombre del cliente o empresa.'
+    );
+
+    return;
+  }
+
+
+  if(!rfc){
+
+    alert(
+      'El RFC es obligatorio.'
+    );
+
+    return;
+  }
+
+
+  clients.unshift({
+
+    id:crypto.randomUUID(),
+
+    company,
+
+    rfc,
+
+    contact:
+      document.getElementById(
+        'cContact'
+      ).value.trim(),
+
+    phone:
+      document.getElementById(
+        'cPhone'
+      ).value.trim(),
+
+    email:
+      document.getElementById(
+        'cEmail'
+      ).value.trim(),
+
+    type:
+      document.getElementById(
+        'cType'
+      ).value,
+
+    status:
+      document.getElementById(
+        'cStatus'
+      ).value,
+
+    createdAt:
+      new Date().toISOString()
+  });
+
+
+  localStorage.setItem(
+    clientKey,
+    JSON.stringify(clients)
+  );
+
+
+  [
+    'cCompany',
+    'cRFC',
+    'cContact',
+    'cPhone',
+    'cEmail'
+  ]
+  .forEach(id=>{
+
+    const element =
+      document.getElementById(id);
+
+    if(element){
+      element.value='';
+    }
+  });
+
+
+  closeClientModal();
+
+  renderAll();
+
+  setView('clients');
+};
+
+
+/* ========================================================
+   CLIENTES · RENDER CON RFC
+======================================================== */
+
+renderClients = function(){
+
+  const table =
+    document.getElementById(
+      'clientsTable'
+    );
+
+  if(!table)return;
+
+
+  const header =
+    table
+      .closest('table')
+      ?.querySelector('thead tr');
+
+
+  if(header){
+
+    header.innerHTML=`
+
+      <th>Empresa</th>
+      <th>RFC</th>
+      <th>Contacto</th>
+      <th>Teléfono</th>
+      <th>Tipo</th>
+      <th>Estatus</th>
+    `;
+  }
+
+
+  table.innerHTML =
+    clients.map(client=>`
+
+      <tr>
+
+        <td>
+          <strong>
+            ${esc(client.company)}
+          </strong>
+        </td>
+
+        <td>
+          ${
+            client.rfc
+            ?
+            esc(client.rfc)
+            :
+            '<span class="low-stock">Pendiente</span>'
+          }
+        </td>
+
+        <td>
+          ${esc(client.contact || '—')}
+        </td>
+
+        <td>
+          ${esc(client.phone || '—')}
+        </td>
+
+        <td>
+          ${esc(client.type || '—')}
+        </td>
+
+        <td>
+          ${esc(client.status || '—')}
+        </td>
+
+      </tr>
+
+    `).join('')
+    ||
+    '<tr><td colspan="6">Aún no hay clientes o prospectos.</td></tr>';
+};
+
+
+/* ========================================================
+   CLIENTE EN VENTAS
+======================================================== */
+
+function v3EnsureSaleCustomerFields(){
+
+  const saleCustomerText =
+    document.getElementById(
+      'saleCustomerText'
+    );
+
+  if(!saleCustomerText)return;
+
+
+  const currentField =
+    saleCustomerText.closest('.field');
+
+
+  if(!document.getElementById('saleRFC')){
+
+    currentField.insertAdjacentHTML(
+      'afterend',
+      `
+
+      <div class="field">
+
+        <label>RFC *</label>
+
+        <input
+          id="saleRFC"
+          maxlength="13"
+          style="text-transform:uppercase"
+          placeholder="RFC del cliente"
+        >
+
+      </div>
+
+
+      <div class="field">
+
+        <label>Correo</label>
+
+        <input
+          id="saleCustomerEmail"
+          type="email"
+          placeholder="Opcional"
+        >
+
+      </div>
+
+
+      <div class="field">
+
+        <label>Teléfono</label>
+
+        <input
+          id="saleCustomerPhone"
+          placeholder="Opcional"
+        >
+
+      </div>
+
+
+      <div class="field">
+
+        <label>Tipo de cliente</label>
+
+        <select id="saleCustomerType">
+
+          <option>
+            Retail
+          </option>
+
+          <option>
+            Centro de Consumo
+          </option>
+
+          <option>
+            Online
+          </option>
+
+          <option>
+            Relaciones Públicas
+          </option>
+
+        </select>
+
+      </div>
+
+      `
+    );
+  }
+
+
+  const select =
+    document.getElementById(
+      'saleClient'
+    );
+
+
+  if(select){
+
+    select.onchange =
+      v3SaleClientChanged;
+  }
+}
+
+
+function v3SaleClientChanged(){
+
+  const clientId =
+    document.getElementById(
+      'saleClient'
+    ).value;
+
+  const client =
+    clients.find(
+      item=>item.id===clientId
+    );
+
+
+  if(!client)return;
+
+
+  document.getElementById(
+    'saleCustomerText'
+  ).value =
+    client.company || '';
+
+
+  document.getElementById(
+    'saleRFC'
+  ).value =
+    client.rfc || '';
+
+
+  document.getElementById(
+    'saleCustomerEmail'
+  ).value =
+    client.email || '';
+
+
+  document.getElementById(
+    'saleCustomerPhone'
+  ).value =
+    client.phone || '';
+
+
+  if(client.type){
+
+    document.getElementById(
+      'saleCustomerType'
+    ).value =
+      client.type;
+  }
+}
+
+
+/* ========================================================
+   TOTAL DE VENTA + IVA
+======================================================== */
+
+function v3EnsureSaleSummary(){
+
+  const total =
+    document.getElementById(
+      'saleModalTotal'
+    );
+
+  if(!total)return;
+
+
+  const container =
+    total.closest(
+      '.invoice-summary'
+    );
+
+
+  if(
+    !container
+    ||
+    document.getElementById(
+      'saleModalSubtotal'
+    )
+  ){
+    return;
+  }
+
+
+  container.outerHTML = `
+
+    <div class="sales-tax-box">
+
+      <div class="sales-tax-row">
+
+        <span>
+          Subtotal antes de IVA
+        </span>
+
+        <strong id="saleModalSubtotal">
+          $0.00
+        </strong>
+
+      </div>
+
+
+      <div class="sales-tax-row">
+
+        <span>
+          IVA 16%
+        </span>
+
+        <strong id="saleModalIVA">
+          $0.00
+        </strong>
+
+      </div>
+
+
+      <div class="sales-tax-row total">
+
+        <span>
+          Total factura
+        </span>
+
+        <strong id="saleModalTotal">
+          $0.00
+        </strong>
+
+      </div>
+
+    </div>
+  `;
+}
+
+
+recalcSaleModal = function(){
+
+  const lines =
+    readSaleLines();
+
+  const subtotal =
+    lines.reduce(
+      (sum,line) =>
+        sum + v3Num(line.revenue),
+      0
+    );
+
+  const iva =
+    subtotal * SALE_IVA_V3;
+
+  const total =
+    subtotal + iva;
+
+
+  const subtotalEl =
+    document.getElementById(
+      'saleModalSubtotal'
+    );
+
+  const ivaEl =
+    document.getElementById(
+      'saleModalIVA'
+    );
+
+  const totalEl =
+    document.getElementById(
+      'saleModalTotal'
+    );
+
+
+  if(subtotalEl){
+    subtotalEl.textContent =
+      money(subtotal);
+  }
+
+  if(ivaEl){
+    ivaEl.textContent =
+      money(iva);
+  }
+
+  if(totalEl){
+    totalEl.textContent =
+      money(total);
+  }
+};
+
+
+/* ========================================================
+   VENTAS · GUARDADO CORREGIDO
+======================================================== */
+
+saveSale = async function(){
+
+  v3SyncAllStocks();
+
+
+  const invoiceNo =
+    document
+      .getElementById(
+        'saleInvoice'
+      )
+      .value
+      .trim();
+
+
+  const date =
+    document.getElementById(
+      'saleDate'
+    ).value;
+
+
+  const status =
+    document.getElementById(
+      'saleStatus'
+    ).value;
+
+
+  const selectedClientId =
+    document.getElementById(
+      'saleClient'
+    ).value;
+
+
+  const manualCustomer =
+    document.getElementById(
+      'saleCustomerText'
+    ).value.trim();
+
+
+  const rfc =
+    (
+      document.getElementById(
+        'saleRFC'
+      ).value || ''
+    )
+    .trim()
+    .toUpperCase();
+
+
+  const email =
+    document.getElementById(
+      'saleCustomerEmail'
+    ).value.trim();
+
+
+  const phone =
+    document.getElementById(
+      'saleCustomerPhone'
+    ).value.trim();
+
+
+  const customerType =
+    document.getElementById(
+      'saleCustomerType'
+    ).value;
+
+
+  const selectedClient =
+    clients.find(
+      item=>item.id===selectedClientId
+    );
+
+
+  const customer =
+    manualCustomer
+    ||
+    selectedClient?.company
+    ||
+    '';
+
+
+  const file =
+    document.getElementById(
+      'saleFile'
+    ).files[0];
+
+
+  const lines =
+    readSaleLines();
+
+
+  if(!invoiceNo){
+
+    alert(
+      'Captura el número de factura Mackavi.'
+    );
+
+    return;
+  }
+
+
+  if(!date){
+
+    alert(
+      'Captura la fecha.'
+    );
+
+    return;
+  }
+
+
+  if(!customer){
+
+    alert(
+      'Selecciona o captura el cliente.'
+    );
+
+    return;
+  }
+
+
+  if(!rfc){
+
+    alert(
+      'El RFC del cliente es obligatorio.'
+    );
+
+    return;
+  }
+
+
+  if(!file){
+
+    alert(
+      'Anexa el archivo de la factura.'
+    );
+
+    return;
+  }
+
+
+  if(!lines.length){
+
+    alert(
+      'Agrega al menos una partida.'
+    );
+
+    return;
+  }
+
+
+  if(
+    saleRecords.some(
+      record =>
+        String(record.invoiceNo)
+          .toLowerCase()
+        ===
+        invoiceNo.toLowerCase()
+    )
+  ){
+
+    alert(
+      'Ya existe una venta con ese número de factura.'
+    );
+
+    return;
+  }
+
+
+  /*
+    VALIDAR INVENTARIO AUTORITATIVO
+  */
+
+  const requested={};
+
+  for(const line of lines){
+
+    requested[line.productId] =
+      (
+        requested[line.productId]
+        || 0
+      )
+      +
+      v3Num(line.quantity);
+  }
+
+
+  for(
+    const [
+      productId,
+      quantity
+    ]
+    of Object.entries(requested)
+  ){
+
+    const product =
+      products.find(
+        item=>item.id===productId
+      );
+
+    const stock =
+      v3Stock(product);
+
+    if(quantity > stock.sale){
+
+      alert(
+        `Inventario insuficiente para ${product?.name || 'producto'}.\n\n`
+        +
+        `Disponible para venta: ${stock.sale}\n`
+        +
+        `Facturado: ${quantity}`
+      );
+
+      return;
+    }
+  }
+
+
+  /*
+    CLIENTE:
+    si se captura desde VENTAS se agrega
+    automáticamente al catálogo.
+  */
+
+  let finalClient =
+    selectedClient;
+
+
+  if(!finalClient){
+
+    finalClient = {
+
+      id:crypto.randomUUID(),
+
+      company:customer,
+
+      rfc,
+
+      contact:'',
+
+      phone,
+
+      email,
+
+      type:customerType,
+
+      status:'Venta concretada',
+
+      createdAt:
+        new Date().toISOString()
+    };
+
+
+    clients.unshift(
+      finalClient
+    );
+
+  } else {
+
+    finalClient.company =
+      customer;
+
+    finalClient.rfc =
+      rfc;
+
+    finalClient.phone =
+      phone;
+
+    finalClient.email =
+      email;
+
+    finalClient.type =
+      customerType;
+
+    finalClient.status =
+      'Venta concretada';
+  }
+
+
+  localStorage.setItem(
+    clientKey,
+    JSON.stringify(clients)
+  );
+
+
+  const fileRecord =
+    await saveInvoiceFile(file);
+
+
+  const saleId =
+    crypto.randomUUID();
+
+
+  /*
+    GENERAR SALIDAS.
+    NO MODIFICAMOS stockSale DIRECTAMENTE.
+    El inventario se deriva de:
+
+    apertura + entradas - salidas
+  */
+
+  for(const line of lines){
+
+    const product =
+      products.find(
+        item=>item.id===line.productId
+      );
+
+
+    outputs.unshift({
+
+      id:crypto.randomUUID(),
+
+      saleId,
+
+      invoiceNo,
+
+      productId:
+        product.id,
+
+      productName:
+        product.name,
+
+      inventoryType:
+        'sale',
+
+      quantity:
+        v3Num(line.quantity),
+
+      reason:
+        'Venta facturada',
+
+      date,
+
+      destination:
+        customer,
+
+      notes:
+        `Factura Mackavi ${invoiceNo}`,
+
+      createdAt:
+        new Date().toISOString()
+    });
+  }
+
+
+  const subtotal =
+    lines.reduce(
+      (sum,line) =>
+        sum + v3Num(line.revenue),
+      0
+    );
+
+
+  const iva =
+    subtotal * SALE_IVA_V3;
+
+
+  const invoiceTotal =
+    subtotal + iva;
+
+
+  const totalCost =
+    lines.reduce(
+      (sum,line) =>
+        sum + v3Num(line.cost),
+      0
+    );
+
+
+  /*
+    UTILIDAD:
+    precio de venta ANTES DE IVA
+    menos costo final de compra.
+  */
+
+  const totalProfit =
+    subtotal - totalCost;
+
+
+  saleRecords.unshift({
+
+    id:saleId,
+
+    invoiceNo,
+
+    date,
+
+    status,
+
+    customerId:
+      finalClient.id,
+
+    customer,
+
+    customerRFC:rfc,
+
+    fileId:
+      fileRecord?.id || null,
+
+    fileName:
+      fileRecord?.name || '',
+
+    lines,
+
+    subtotal,
+
+    iva,
+
+    totalRevenue:
+      invoiceTotal,
+
+    totalCost,
+
+    totalProfit,
+
+    createdAt:
+      new Date().toISOString()
+  });
+
+
+  localStorage.setItem(
+    outputKey,
+    JSON.stringify(outputs)
+  );
+
+
+  localStorage.setItem(
+    saleStorageKey,
+    JSON.stringify(saleRecords)
+  );
+
+
+  v3SyncAllStocks();
+
+  closeSaleModal();
+
+  renderAll();
+
+  setView('sales');
+};
+
+
+/* ========================================================
+   LECTURA CFDI XML
+======================================================== */
+
+function v3ParseXML(text){
+
+  const xml =
+    new DOMParser()
+      .parseFromString(
+        text,
+        'application/xml'
+      );
+
+
+  const parserError =
+    xml.getElementsByTagName(
+      'parsererror'
+    )[0];
+
+
+  if(parserError){
+
+    throw new Error(
+      'El XML no pudo ser leído.'
+    );
+  }
+
+
+  const comprobante =
+    xml.getElementsByTagNameNS(
+      '*',
+      'Comprobante'
+    )[0];
+
+
+  if(!comprobante){
+
+    throw new Error(
+      'No parece ser un CFDI XML.'
+    );
+  }
+
+
+  const emisor =
+    xml.getElementsByTagNameNS(
+      '*',
+      'Emisor'
+    )[0];
+
+
+  const receptor =
+    xml.getElementsByTagNameNS(
+      '*',
+      'Receptor'
+    )[0];
+
+
+  const conceptos =
+    [
+      ...xml.getElementsByTagNameNS(
+        '*',
+        'Concepto'
+      )
+    ];
+
+
+  const serie =
+    comprobante.getAttribute(
+      'Serie'
+    ) || '';
+
+
+  const folio =
+    comprobante.getAttribute(
+      'Folio'
+    ) || '';
+
+
+  const invoiceNo =
+    [serie,folio]
+      .filter(Boolean)
+      .join('-');
+
+
+  return {
+
+    invoiceNo,
+
+    date:
+      String(
+        comprobante.getAttribute(
+          'Fecha'
+        ) || ''
+      ).slice(0,10),
+
+    total:
+      v3Num(
+        comprobante.getAttribute(
+          'Total'
+        )
+      ),
+
+    subtotal:
+      v3Num(
+        comprobante.getAttribute(
+          'SubTotal'
+        )
+      ),
+
+    issuer:{
+      name:
+        emisor?.getAttribute(
+          'Nombre'
+        ) || '',
+
+      rfc:
+        emisor?.getAttribute(
+          'Rfc'
+        ) || ''
+    },
+
+    receiver:{
+      name:
+        receptor?.getAttribute(
+          'Nombre'
+        ) || '',
+
+      rfc:
+        receptor?.getAttribute(
+          'Rfc'
+        ) || ''
+    },
+
+    items:
+      conceptos.map(
+        concept=>({
+
+          sku:
+            concept.getAttribute(
+              'NoIdentificacion'
+            ) || '',
+
+          description:
+            concept.getAttribute(
+              'Descripcion'
+            ) || '',
+
+          quantity:
+            v3Num(
+              concept.getAttribute(
+                'Cantidad'
+              )
+            ),
+
+          unitPrice:
+            v3Num(
+              concept.getAttribute(
+                'ValorUnitario'
+              )
+            ),
+
+          amount:
+            v3Num(
+              concept.getAttribute(
+                'Importe'
+              )
+            )
+        })
+      )
+  };
+}
+
+
+/* ========================================================
+   PDF.JS
+======================================================== */
+
+let v3PdfJsPromise=null;
+
+
+async function v3PdfJs(){
+
+  if(!v3PdfJsPromise){
+
+    v3PdfJsPromise =
+      import(
+        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs'
+      );
+  }
+
+
+  const pdfjs =
+    await v3PdfJsPromise;
+
+
+  pdfjs.GlobalWorkerOptions.workerSrc =
+    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.mjs';
+
+
+  return pdfjs;
+}
+
+
+async function v3ExtractPDF(file){
+
+  const pdfjs =
+    await v3PdfJs();
+
+
+  const data =
+    await file.arrayBuffer();
+
+
+  const pdf =
+    await pdfjs.getDocument({
+      data
+    }).promise;
+
+
+  const lines=[];
+
+
+  for(
+    let pageNo=1;
+    pageNo<=pdf.numPages;
+    pageNo++
+  ){
+
+    const page =
+      await pdf.getPage(pageNo);
+
+
+    const content =
+      await page.getTextContent();
+
+
+    const rows=[];
+
+
+    for(const item of content.items){
+
+      if(!item.str?.trim()){
+        continue;
+      }
+
+      rows.push({
+
+        text:item.str.trim(),
+
+        x:
+          item.transform?.[4] || 0,
+
+        y:
+          item.transform?.[5] || 0
+      });
+    }
+
+
+    rows.sort(
+      (a,b) =>
+        Math.abs(b.y-a.y) > 2
+        ?
+        b.y-a.y
+        :
+        a.x-b.x
+    );
+
+
+    const grouped=[];
+
+
+    for(const row of rows){
+
+      let target =
+        grouped.find(
+          group =>
+            Math.abs(
+              group.y-row.y
+            ) < 2
+        );
+
+
+      if(!target){
+
+        target={
+          y:row.y,
+          items:[]
+        };
+
+        grouped.push(target);
+      }
+
+
+      target.items.push(row);
+    }
+
+
+    grouped.sort(
+      (a,b)=>b.y-a.y
+    );
+
+
+    for(const group of grouped){
+
+      group.items.sort(
+        (a,b)=>a.x-b.x
+      );
+
+      lines.push(
+        group.items
+          .map(item=>item.text)
+          .join(' ')
+          .replace(/\s+/g,' ')
+          .trim()
+      );
+    }
+  }
+
+
+  return lines.filter(Boolean);
+}
+
+
+/* ========================================================
+   INTERPRETACIÓN BÁSICA PDF
+======================================================== */
+
+function v3ParsePDFLines(lines){
+
+  const text =
+    lines.join('\n');
+
+
+  const folioPatterns = [
+
+    /(?:Factura|Folio|No\.?\s*Factura)\s*[:#-]?\s*([A-Z0-9\/-]{3,})/i,
+
+    /\b([A-Z]{1,5}-\d{2,})\b/
+  ];
+
+
+  let invoiceNo='';
+
+
+  for(const pattern of folioPatterns){
+
+    const match =
+      text.match(pattern);
+
+    if(match){
+
+      invoiceNo =
+        match[1];
+
+      break;
+    }
+  }
+
+
+  const dateMatch =
+    text.match(
+      /\b(20\d{2}[-\/]\d{1,2}[-\/]\d{1,2})\b/
+    );
+
+
+  const rfcs =
+    [
+      ...text.matchAll(
+        /\b[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}\b/g
+      )
+    ]
+    .map(match=>match[0]);
+
+
+  function lineAfter(word){
+
+    const index =
+      lines.findIndex(
+        line =>
+          v3Normalize(line)
+            .includes(
+              v3Normalize(word)
+            )
+      );
+
+
+    if(index < 0){
+      return '';
+    }
+
+
+    return lines[index+1] || '';
+  }
+
+
+  const items=[];
+
+
+  for(const product of products){
+
+    const sku =
+      v3Normalize(product.sku);
+
+    const name =
+      v3Normalize(product.name);
+
+
+    const index =
+      lines.findIndex(line=>{
+
+        const normalized =
+          v3Normalize(line);
+
+        return (
+          sku
+          &&
+          normalized.includes(sku)
+        )
+        ||
+        (
+          name.length > 3
+          &&
+          normalized.includes(name)
+        );
+      });
+
+
+    if(index < 0){
+      continue;
+    }
+
+
+    const context =
+      [
+        lines[index],
+        lines[index+1] || '',
+        lines[index+2] || ''
+      ]
+      .join(' ');
+
+
+    const numbers =
+      [
+        ...context.matchAll(
+          /(?:\$?\s*)?(\d+(?:,\d{3})*(?:\.\d+)?)/g
+        )
+      ]
+      .map(match =>
+        Number(
+          match[1].replaceAll(',','')
+        )
+      )
+      .filter(Number.isFinite);
+
+
+    let quantity=1;
+    let unitPrice=0;
+
+
+    if(numbers.length >= 2){
+
+      quantity =
+        numbers.find(
+          n =>
+            n > 0
+            &&
+            Number.isInteger(n)
+            &&
+            n < 10000
+        )
+        || 1;
+
+
+      unitPrice =
+        numbers[
+          numbers.length-1
+        ];
+    }
+
+
+    items.push({
+
+      productId:product.id,
+
+      sku:product.sku || '',
+
+      description:product.name,
+
+      quantity,
+
+      unitPrice
+    });
+  }
+
+
+  return {
+
+    invoiceNo,
+
+    date:
+      dateMatch
+      ?
+      v3Date(dateMatch[1])
+      :
+      '',
+
+    issuer:{
+      name:
+        lineAfter('Emisor'),
+
+      rfc:
+        rfcs[0] || ''
+    },
+
+    receiver:{
+      name:
+        lineAfter('Receptor'),
+
+      rfc:
+        rfcs[1] || ''
+    },
+
+    items,
+
+    raw:text
+  };
+}
+
+
+/* ========================================================
+   MATCH PRODUCTOS
+======================================================== */
+
+function v3MatchProduct(item){
+
+  if(item.productId){
+
+    return products.find(
+      p=>p.id===item.productId
+    );
+  }
+
+
+  const itemSku =
+    v3Normalize(item.sku);
+
+
+  const itemDescription =
+    v3Normalize(
+      item.description
+    );
+
+
+  let match =
+    products.find(product=>
+
+      itemSku
+      &&
+      v3Normalize(product.sku)
+      === itemSku
+    );
+
+
+  if(match)return match;
+
+
+  match =
+    products.find(product=>{
+
+      const name =
+        v3Normalize(product.name);
+
+      return (
+        name.length > 3
+        &&
+        (
+          itemDescription.includes(name)
+          ||
+          name.includes(itemDescription)
+        )
+      );
+    });
+
+
+  return match;
+}
+
+
+/* ========================================================
+   AUTOFILL COMPRA
+======================================================== */
+
+async function v3ReadPurchaseFile(){
+
+  const input =
+    document.getElementById(
+      'purchaseFile'
+    );
+
+
+  const file =
+    input?.files?.[0];
+
+
+  if(!file)return;
+
+
+  const readerStatus =
+    document.getElementById(
+      'purchaseReading'
+    );
+
+
+  if(readerStatus){
+    readerStatus.classList.add(
+      'active'
+    );
+  }
+
+
+  try{
+
+    let data;
+
+
+    if(
+      file.name
+        .toLowerCase()
+        .endsWith('.xml')
+    ){
+
+      data =
+        v3ParseXML(
+          await file.text()
+        );
+
+    } else if(
+      file.name
+        .toLowerCase()
+        .endsWith('.pdf')
+    ){
+
+      data =
+        v3ParsePDFLines(
+          await v3ExtractPDF(file)
+        );
+
+    } else {
+
+      alert(
+        'Para autollenado utiliza XML o PDF. '
+        +
+        'La imagen se conservará como archivo, '
+        +
+        'pero no se extraerán datos automáticamente.'
+      );
+
+      return;
+    }
+
+
+    if(data.invoiceNo){
+
+      document.getElementById(
+        'purchaseInvoice'
+      ).value =
+        data.invoiceNo;
+    }
+
+
+    if(data.date){
+
+      document.getElementById(
+        'purchaseDate'
+      ).value =
+        data.date;
+    }
+
+
+    if(data.issuer?.name){
+
+      document.getElementById(
+        'purchaseSupplier'
+      ).value =
+        data.issuer.name;
+    }
+
+
+    if(data.items?.length){
+
+      const container =
+        document.getElementById(
+          'purchaseLines'
+        );
+
+      container.innerHTML='';
+
+
+      let unmatched=0;
+
+
+      for(const item of data.items){
+
+        addPurchaseLine();
+
+        const row =
+          container.lastElementChild;
+
+
+        const product =
+          v3MatchProduct(item);
+
+
+        if(product){
+
+          row.querySelector(
+            '.pl-product'
+          ).value =
+            product.id;
+
+        } else {
+
+          unmatched++;
+        }
+
+
+        row.querySelector(
+          '.pl-qty'
+        ).value =
+          item.quantity || 1;
+
+
+        row.querySelector(
+          '.pl-price'
+        ).value =
+          v3Num(
+            item.unitPrice
+          ).toFixed(2);
+
+
+        if(
+          v3Num(item.unitPrice)
+          === 0
+        ){
+
+          row.querySelector(
+            '.pl-type'
+          ).value='free';
+        }
+      }
+
+
+      recalcPurchaseModal();
+
+
+      if(unmatched){
+
+        alert(
+          `Factura leída.\n\n`
+          +
+          `${unmatched} partida(s) no pudieron asociarse `
+          +
+          `automáticamente con un producto del catálogo. `
+          +
+          `Selecciona el producto manualmente antes de guardar.`
+        );
+
+      } else {
+
+        alert(
+          'Factura leída. '
+          +
+          'Revisa las partidas antes de guardar.'
+        );
+      }
+    }
+
+
+  } catch(error){
+
+    console.error(error);
+
+    alert(
+      'No fue posible extraer automáticamente todos '
+      +
+      'los datos de esta factura.\n\n'
+      +
+      'Puedes continuar capturándola manualmente.'
+    );
+
+  } finally {
+
+    if(readerStatus){
+
+      readerStatus.classList.remove(
+        'active'
+      );
+    }
+  }
+}
+
+
+/* ========================================================
+   AUTOFILL VENTA
+======================================================== */
+
+async function v3ReadSaleFile(){
+
+  const input =
+    document.getElementById(
+      'saleFile'
+    );
+
+
+  const file =
+    input?.files?.[0];
+
+
+  if(!file)return;
+
+
+  const readerStatus =
+    document.getElementById(
+      'saleReading'
+    );
+
+
+  if(readerStatus){
+    readerStatus.classList.add(
+      'active'
+    );
+  }
+
+
+  try{
+
+    let data;
+
+
+    if(
+      file.name
+        .toLowerCase()
+        .endsWith('.xml')
+    ){
+
+      data =
+        v3ParseXML(
+          await file.text()
+        );
+
+    } else if(
+      file.name
+        .toLowerCase()
+        .endsWith('.pdf')
+    ){
+
+      data =
+        v3ParsePDFLines(
+          await v3ExtractPDF(file)
+        );
+
+    } else {
+
+      alert(
+        'Para autollenado utiliza XML o PDF.'
+      );
+
+      return;
+    }
+
+
+    if(data.invoiceNo){
+
+      document.getElementById(
+        'saleInvoice'
+      ).value =
+        data.invoiceNo;
+    }
+
+
+    if(data.date){
+
+      document.getElementById(
+        'saleDate'
+      ).value =
+        data.date;
+    }
+
+
+    if(data.receiver?.name){
+
+      document.getElementById(
+        'saleCustomerText'
+      ).value =
+        data.receiver.name;
+    }
+
+
+    if(data.receiver?.rfc){
+
+      document.getElementById(
+        'saleRFC'
+      ).value =
+        data.receiver.rfc;
+    }
+
+
+    /*
+      Intentar seleccionar cliente existente por RFC.
+    */
+
+    if(data.receiver?.rfc){
+
+      const existing =
+        clients.find(
+          client =>
+            String(client.rfc || '')
+              .toUpperCase()
+            ===
+            String(data.receiver.rfc)
+              .toUpperCase()
+        );
+
+
+      if(existing){
+
+        document.getElementById(
+          'saleClient'
+        ).value =
+          existing.id;
+
+        v3SaleClientChanged();
+      }
+    }
+
+
+    if(data.items?.length){
+
+      const container =
+        document.getElementById(
+          'saleLines'
+        );
+
+      container.innerHTML='';
+
+
+      let unmatched=0;
+
+
+      for(const item of data.items){
+
+        addSaleLine();
+
+        const row =
+          container.lastElementChild;
+
+
+        const product =
+          v3MatchProduct(item);
+
+
+        if(product){
+
+          row.querySelector(
+            '.sl-product'
+          ).value =
+            product.id;
+
+        } else {
+
+          unmatched++;
+        }
+
+
+        row.querySelector(
+          '.sl-qty'
+        ).value =
+          item.quantity || 1;
+
+
+        /*
+          VALOR UNITARIO CFDI =
+          PRECIO ANTES DE IVA
+        */
+
+        row.querySelector(
+          '.sl-price'
+        ).value =
+          v3Num(
+            item.unitPrice
+          ).toFixed(2);
+      }
+
+
+      recalcSaleModal();
+
+
+      if(unmatched){
+
+        alert(
+          `Factura leída.\n\n`
+          +
+          `${unmatched} partida(s) requieren seleccionar `
+          +
+          `manualmente el producto del catálogo.`
+        );
+
+      } else {
+
+        alert(
+          'Factura leída correctamente. '
+          +
+          'Revisa los datos antes de guardar.'
+        );
+      }
+    }
+
+
+  } catch(error){
+
+    console.error(error);
+
+    alert(
+      'No fue posible extraer automáticamente todos '
+      +
+      'los datos del documento.\n\n'
+      +
+      'Puedes completar la captura manualmente.'
+    );
+
+  } finally {
+
+    if(readerStatus){
+
+      readerStatus.classList.remove(
+        'active'
+      );
+    }
+  }
+}
+
+
+/* ========================================================
+   MEJORAR INPUTS DE ARCHIVO
+======================================================== */
+
+function v3AttachDocumentReaders(){
+
+  const purchaseFile =
+    document.getElementById(
+      'purchaseFile'
+    );
+
+
+  if(
+    purchaseFile
+    &&
+    !document.getElementById(
+      'purchaseReading'
+    )
+  ){
+
+    purchaseFile.insertAdjacentHTML(
+      'afterend',
+      `
+
+      <div
+        class="document-reading"
+        id="purchaseReading"
+      >
+        Leyendo factura y llenando formulario…
+      </div>
+
+      <div class="invoice-autofill-note">
+        XML: extracción exacta de CFDI.
+        PDF: extracción automática cuando el documento contiene texto.
+      </div>
+
+      `
+    );
+
+
+    purchaseFile.addEventListener(
+      'change',
+      v3ReadPurchaseFile
+    );
+  }
+
+
+  const saleFile =
+    document.getElementById(
+      'saleFile'
+    );
+
+
+  if(
+    saleFile
+    &&
+    !document.getElementById(
+      'saleReading'
+    )
+  ){
+
+    saleFile.insertAdjacentHTML(
+      'afterend',
+      `
+
+      <div
+        class="document-reading"
+        id="saleReading"
+      >
+        Leyendo factura y llenando formulario…
+      </div>
+
+      <div class="invoice-autofill-note">
+        El precio unitario extraído se considera
+        antes de IVA. El sistema agrega 16% al total.
+      </div>
+
+      `
+    );
+
+
+    saleFile.addEventListener(
+      'change',
+      v3ReadSaleFile
+    );
+  }
+}
+
+
+/* ========================================================
+   INVENTARIO RENDER
+======================================================== */
+
+renderInventory = function(){
+
+  v3SyncAllStocks();
+
+
+  const table =
+    document.getElementById(
+      'inventoryTable'
+    );
+
+
+  if(!table)return;
+
+
+  const header =
+    table
+      .closest('table')
+      ?.querySelector('thead tr');
+
+
+  if(header){
+
+    header.innerHTML=`
+
+      <th>Producto</th>
+      <th>Para venta</th>
+      <th>Sin cargo</th>
+      <th>Total</th>
+      <th>Mínimo venta</th>
+      <th>Estado</th>
+      <th>Valor comprado</th>
+      <th></th>
+    `;
+  }
+
+
+  table.innerHTML =
+    products.map(product=>{
+
+      const stock =
+        v3Stock(product);
+
+
+      const purchaseCost =
+        pricing(
+          product.cost
+        ).purchaseFinal;
+
+
+      const purchasedValue =
+        stock.sale
+        *
+        purchaseCost;
+
+
+      const low =
+        stock.sale
+        <=
+        v3Num(product.minimum);
+
+
+      return `
+
+      <tr
+        class="inventory-clickable"
+        onclick="
+          v3OpenInventoryEdit(
+            '${product.id}'
+          )
+        "
+      >
+
+        <td>
+
+          <strong>
+            ${esc(product.name)}
+          </strong>
+
+          <br>
+
+          <small>
+            ${esc(product.sku || '')}
+          </small>
+
+        </td>
+
+        <td>
+          ${stock.sale}
+        </td>
+
+        <td style="color:var(--gold2)">
+          ${stock.free}
+        </td>
+
+        <td>
+          <strong>
+            ${stock.sale + stock.free}
+          </strong>
+        </td>
+
+        <td>
+          ${v3Num(product.minimum)}
+        </td>
+
+        <td class="${low?'low-stock':'good'}">
+
+          ${
+            low
+            ?
+            'Stock venta bajo'
+            :
+            'Disponible'
+          }
+
+        </td>
+
+        <td class="money">
+
+          ${money(purchasedValue)}
+
+        </td>
+
+        <td>
+
+          <button
+            class="inventory-edit-button"
+            onclick="
+              event.stopPropagation();
+              v3OpenInventoryEdit(
+                '${product.id}'
+              );
+            "
+          >
+            Editar
+          </button>
+
+        </td>
+
+      </tr>
+      `;
+
+    }).join('')
+    ||
+    '<tr><td colspan="8">Aún no hay inventario.</td></tr>';
+};
+
+
+/* ========================================================
+   PRODUCTOS CON INVENTARIO REAL
+======================================================== */
+
+renderProducts = function(){
+
+  v3SyncAllStocks();
+
+
+  const q =
+    (
+      document.getElementById(
+        'productSearch'
+      )?.value
+      || ''
+    )
+    .toLowerCase();
+
+
+  const rows =
+    products
+    .filter(product =>
+      (
+        product.name
+        +
+        ' '
+        +
+        product.sku
+      )
+      .toLowerCase()
+      .includes(q)
+    )
+    .map(product=>{
+
+      const x =
+        pricing(product.cost);
+
+
+      const stock =
+        v3Stock(product);
+
+
+      const total =
+        stock.sale + stock.free;
+
+
+      return `
+
+      <tr>
+
+        <td>
+          ${esc(product.sku || '—')}
+        </td>
+
+        <td>
+
+          <strong>
+            ${esc(product.name)}
+          </strong>
+
+          <br>
+
+          <small>
+            ${esc(product.presentation || '')}
+          </small>
+
+        </td>
+
+        <td class="${
+          stock.sale <= v3Num(product.minimum)
+          ?
+          'low-stock'
+          :
+          'good'
+        }">
+
+          ${total}
+
+          <br>
+
+          <small>
+            Venta ${stock.sale}
+            ·
+            Sin cargo ${stock.free}
+          </small>
+
+        </td>
+
+        <td class="money">
+          ${money(product.cost)}
+        </td>
+
+        <td class="money">
+          ${money(x.purchaseFinal)}
+        </td>
+
+        <td class="money">
+          ${money(pricing(product.cost,.10).final)}
+        </td>
+
+        <td class="money">
+          ${money(pricing(product.cost,.20).final)}
+        </td>
+
+        <td class="money">
+          ${money(pricing(product.cost,.30).final)}
+        </td>
+
+      </tr>
+      `;
+
+    })
+    .join('');
+
+
+  document.getElementById(
+    'productsTable'
+  ).innerHTML =
+    rows
+    ||
+    '<tr><td colspan="8">Aún no hay productos.</td></tr>';
+
+
+  updateQuoteProducts();
+
+  if(typeof updateOutputProducts === 'function'){
+    updateOutputProducts();
+  }
+};
+
+
+/* ========================================================
+   DASHBOARD
+======================================================== */
+
+const v3PreviousDashboard =
+  renderDashboard;
+
+
+renderDashboard = function(){
+
+  v3SyncAllStocks();
+
+  v3PreviousDashboard();
+
+
+  const grid =
+    document.querySelector(
+      '#view-dashboard .metric-grid'
+    );
+
+
+  if(!grid)return;
+
+
+  /*
+    Renombrar valorización actual.
+  */
+
+  const purchaseMetric =
+    document.getElementById(
+      'metricValue'
+    );
+
+
+  if(purchaseMetric){
+
+    const card =
+      purchaseMetric.closest(
+        '.metric'
+      );
+
+
+    const label =
+      card?.querySelector(
+        '.metric-label'
+      );
+
+
+    const foot =
+      card?.querySelector(
+        '.metric-foot'
+      );
+
+
+    if(label){
+
+      label.textContent =
+        'Inventario · costo compra';
+    }
+
+
+    if(foot){
+
+      foot.textContent =
+        'Proveedor después de IEPS + IVA';
+    }
+  }
+
+
+  if(
+    !document.getElementById(
+      'metricSaleValue'
+    )
+  ){
+
+    grid.insertAdjacentHTML(
+      'beforeend',
+      `
+
+      <article class="metric metric-highlight">
+
+        <div class="metric-label">
+          Inventario · valor venta
+        </div>
+
+        <div
+          class="metric-value"
+          id="metricSaleValue"
+        >
+          $0
+        </div>
+
+        <div class="metric-foot">
+          Precio estimado sin IVA · margen 20%
+        </div>
+
+      </article>
+
+      `
+    );
+  }
+
+
+  let purchaseValue=0;
+  let saleValuePreIVA=0;
+
+
+  for(const product of products){
+
+    const stock =
+      v3Stock(product);
+
+
+    /*
+      Valor comprado:
+      solo inventario pagado / para venta.
+    */
+
+    purchaseValue +=
+      stock.sale
+      *
+      pricing(
+        product.cost
+      ).purchaseFinal;
+
+
+    /*
+      Valor potencial de VENTA:
+      todo el inventario disponible,
+      incluyendo mercancía sin cargo.
+
+      Usamos lista estándar del 20% y
+      quitamos IVA 16%.
+    */
+
+    const salePriceWithIVA =
+      pricing(
+        product.cost,
+        .20
+      ).final;
+
+
+    const salePricePreIVA =
+      salePriceWithIVA
+      /
+      1.16;
+
+
+    saleValuePreIVA +=
+      (
+        stock.sale
+        +
+        stock.free
+      )
+      *
+      salePricePreIVA;
+  }
+
+
+  if(purchaseMetric){
+
+    purchaseMetric.textContent =
+      money(purchaseValue);
+  }
+
+
+  document.getElementById(
+    'metricSaleValue'
+  ).textContent =
+    money(saleValuePreIVA);
+};
+
+
+/* ========================================================
+   REPORTES · CORREGIR UTILIDAD SIN IVA
+======================================================== */
+
+if(typeof renderReports === 'function'){
+
+  const v3PreviousReports =
+    renderReports;
+
+
+  renderReports = function(){
+
+    v3PreviousReports();
+
+
+    const profit =
+      saleRecords.reduce(
+        (sum,sale) =>
+          sum
+          +
+          v3Num(
+            sale.totalProfit
+          ),
+        0
+      );
+
+
+    const profitEl =
+      document.getElementById(
+        'reportProfit'
+      );
+
+
+    if(profitEl){
+
+      profitEl.textContent =
+        money(profit);
+    }
+  };
+}
+
+
+/* ========================================================
+   SALES TABLE
+======================================================== */
+
+if(typeof renderSales === 'function'){
+
+  const v3PreviousSales =
+    renderSales;
+
+
+  renderSales = function(){
+
+    v3PreviousSales();
+
+
+    /*
+      Los nuevos registros guardan totalRevenue
+      CON IVA y totalProfit SIN IVA.
+    */
+
+    const revenue =
+      saleRecords.reduce(
+        (sum,item) =>
+          sum
+          +
+          v3Num(
+            item.totalRevenue
+          ),
+        0
+      );
+
+
+    const profit =
+      saleRecords.reduce(
+        (sum,item) =>
+          sum
+          +
+          v3Num(
+            item.totalProfit
+          ),
+        0
+      );
+
+
+    const pending =
+      saleRecords
+      .filter(item =>
+        item.status === 'Emitida'
+        ||
+        item.status === 'Pendiente de pago'
+      )
+      .reduce(
+        (sum,item) =>
+          sum
+          +
+          v3Num(
+            item.totalRevenue
+          ),
+        0
+      );
+
+
+    const revenueEl =
+      document.getElementById(
+        'saleRevenue'
+      );
+
+
+    const profitEl =
+      document.getElementById(
+        'saleProfit'
+      );
+
+
+    const pendingEl =
+      document.getElementById(
+        'salePending'
+      );
+
+
+    if(revenueEl){
+      revenueEl.textContent =
+        money(revenue);
+    }
+
+
+    if(profitEl){
+      profitEl.textContent =
+        money(profit);
+    }
+
+
+    if(pendingEl){
+      pendingEl.textContent =
+        money(pending);
+    }
+  };
+}
+
+
+/* ========================================================
+   OPEN SALE MODAL
+======================================================== */
+
+if(typeof openSaleModal === 'function'){
+
+  const v3PreviousOpenSale =
+    openSaleModal;
+
+
+  openSaleModal = function(){
+
+    v3PreviousOpenSale();
+
+    v3EnsureSaleCustomerFields();
+
+    v3EnsureSaleSummary();
+
+    v3AttachDocumentReaders();
+
+
+    const rfc =
+      document.getElementById(
+        'saleRFC'
+      );
+
+
+    const email =
+      document.getElementById(
+        'saleCustomerEmail'
+      );
+
+
+    const phone =
+      document.getElementById(
+        'saleCustomerPhone'
+      );
+
+
+    if(rfc)rfc.value='';
+    if(email)email.value='';
+    if(phone)phone.value='';
+
+
+    recalcSaleModal();
+  };
+}
+
+
+/* ========================================================
+   OPEN PURCHASE MODAL
+======================================================== */
+
+if(typeof openPurchaseModal === 'function'){
+
+  const v3PreviousOpenPurchase =
+    openPurchaseModal;
+
+
+  openPurchaseModal = function(){
+
+    v3PreviousOpenPurchase();
+
+    v3AttachDocumentReaders();
+  };
+}
+
+
+/* ========================================================
+   INICIALIZACIÓN
+======================================================== */
+
+function v3Init(){
+
+  v3EnsureInventoryModal();
+
+  v3EnsureClientRFC();
+
+  v3EnsureSaleCustomerFields();
+
+  v3EnsureSaleSummary();
+
+  v3AttachDocumentReaders();
+
+  v3MigrateInventory();
+
+  renderAll();
+}
+
+
+if(document.readyState === 'loading'){
+
+  document.addEventListener(
+    'DOMContentLoaded',
+    v3Init
+  );
+
+} else {
+
+  v3Init();
+}
+
+</script>
+
+<!-- === LABRU V3 JS END === -->
 
 </body>
 </html>
