@@ -9464,5 +9464,657 @@ renderAll();
 
 <!-- === LABRU INVENTORY V4 END === -->
 
+
+<!-- === LABRU SALES V5 START === -->
+
+<script>
+
+const LABRU_SALE_IVA_V5 = 0.16;
+
+
+/* ========================================================
+   NORMALIZAR VENTAS EXISTENTES
+======================================================== */
+
+function v5NormalizeSales(){
+
+  let changed=false;
+
+  saleRecords = (saleRecords || []).map(sale=>{
+
+    /*
+      Las líneas guardan el precio unitario ANTES DE IVA.
+    */
+
+    const subtotal =
+      (sale.lines || [])
+      .reduce(
+        (sum,line) =>
+          sum
+          +
+          (
+            Number(line.unitSale || 0)
+            *
+            Number(line.quantity || 0)
+          ),
+        0
+      );
+
+
+    const iva =
+      subtotal * LABRU_SALE_IVA_V5;
+
+
+    const totalWithIVA =
+      subtotal + iva;
+
+
+    const totalCost =
+      sale.totalCost !== undefined
+      ?
+      Number(sale.totalCost || 0)
+      :
+      (sale.lines || [])
+      .reduce(
+        (sum,line) =>
+          sum + Number(line.cost || 0),
+        0
+      );
+
+
+    /*
+      SOLICITADO:
+      utilidad calculada desde el total CON IVA.
+    */
+
+    const totalProfit =
+      totalWithIVA - totalCost;
+
+
+    if(
+      Number(sale.subtotal || 0) !== subtotal
+      ||
+      Number(sale.iva || 0) !== iva
+      ||
+      Number(sale.totalRevenue || 0) !== totalWithIVA
+      ||
+      Number(sale.totalProfit || 0) !== totalProfit
+    ){
+      changed=true;
+    }
+
+
+    return {
+      ...sale,
+
+      subtotal,
+
+      iva,
+
+      totalRevenue:
+        totalWithIVA,
+
+      totalCost,
+
+      totalProfit
+    };
+  });
+
+
+  if(changed){
+
+    localStorage.setItem(
+      saleStorageKey,
+      JSON.stringify(saleRecords)
+    );
+  }
+}
+
+
+/* ========================================================
+   TOTAL DEL MODAL
+======================================================== */
+
+recalcSaleModal = function(){
+
+  const lines =
+    readSaleLines();
+
+
+  const subtotal =
+    lines.reduce(
+      (sum,line) =>
+        sum + Number(line.revenue || 0),
+      0
+    );
+
+
+  const iva =
+    subtotal * LABRU_SALE_IVA_V5;
+
+
+  const total =
+    subtotal + iva;
+
+
+  const subtotalEl =
+    document.getElementById(
+      'saleModalSubtotal'
+    );
+
+
+  const ivaEl =
+    document.getElementById(
+      'saleModalIVA'
+    );
+
+
+  const totalEl =
+    document.getElementById(
+      'saleModalTotal'
+    );
+
+
+  if(subtotalEl){
+    subtotalEl.textContent =
+      money(subtotal);
+  }
+
+
+  if(ivaEl){
+    ivaEl.textContent =
+      money(iva);
+  }
+
+
+  if(totalEl){
+    totalEl.textContent =
+      money(total);
+  }
+};
+
+
+/* ========================================================
+   NUEVAS VENTAS
+
+   Dejamos que la lógica existente cree la venta y después
+   normalizamos inmediatamente IVA + utilidad.
+======================================================== */
+
+if(typeof saveSale === 'function'){
+
+  const v5OriginalSaveSale =
+    saveSale;
+
+
+  saveSale = async function(){
+
+    await v5OriginalSaveSale();
+
+    v5NormalizeSales();
+
+    if(typeof v4SyncInventory === 'function'){
+      v4SyncInventory();
+    }
+
+    renderAll();
+  };
+}
+
+
+/* ========================================================
+   TABLA DE VENTAS
+======================================================== */
+
+renderSales = function(){
+
+  v5NormalizeSales();
+
+
+  const tbody =
+    document.getElementById(
+      'salesTable'
+    );
+
+
+  if(!tbody)return;
+
+
+  const table =
+    tbody.closest('table');
+
+
+  const header =
+    table?.querySelector(
+      'thead tr'
+    );
+
+
+  if(header){
+
+    header.innerHTML = `
+
+      <th>Fecha</th>
+      <th>Factura</th>
+      <th>Cliente</th>
+      <th>Status</th>
+      <th>Unidades</th>
+      <th>Subtotal</th>
+      <th>IVA 16%</th>
+      <th>Total con IVA</th>
+      <th>Utilidad</th>
+      <th>Archivo</th>
+    `;
+  }
+
+
+  const revenue =
+    saleRecords.reduce(
+      (sum,item) =>
+        sum + Number(item.totalRevenue || 0),
+      0
+    );
+
+
+  const profit =
+    saleRecords.reduce(
+      (sum,item) =>
+        sum + Number(item.totalProfit || 0),
+      0
+    );
+
+
+  const pending =
+    saleRecords
+      .filter(item =>
+        item.status === 'Emitida'
+        ||
+        item.status === 'Pendiente de pago'
+      )
+      .reduce(
+        (sum,item) =>
+          sum + Number(item.totalRevenue || 0),
+        0
+      );
+
+
+  const saleCount =
+    document.getElementById(
+      'saleCount'
+    );
+
+  const saleRevenue =
+    document.getElementById(
+      'saleRevenue'
+    );
+
+  const saleProfit =
+    document.getElementById(
+      'saleProfit'
+    );
+
+  const salePending =
+    document.getElementById(
+      'salePending'
+    );
+
+
+  if(saleCount){
+    saleCount.textContent =
+      saleRecords.length;
+  }
+
+  if(saleRevenue){
+    saleRevenue.textContent =
+      money(revenue);
+  }
+
+  if(saleProfit){
+    saleProfit.textContent =
+      money(profit);
+  }
+
+  if(salePending){
+    salePending.textContent =
+      money(pending);
+  }
+
+
+  tbody.innerHTML =
+    saleRecords.map(record=>{
+
+      const units =
+        (record.lines || [])
+        .reduce(
+          (sum,line) =>
+            sum + Number(line.quantity || 0),
+          0
+        );
+
+
+      return `
+
+      <tr>
+
+        <td>
+          ${esc(record.date || '')}
+        </td>
+
+
+        <td>
+          <strong>
+            ${esc(record.invoiceNo || '')}
+          </strong>
+        </td>
+
+
+        <td>
+          ${esc(record.customer || '')}
+        </td>
+
+
+        <td>
+
+          <select
+            class="status-select"
+            onchange="
+              updateSaleStatus(
+                '${record.id}',
+                this.value
+              )
+            "
+          >
+
+            <option
+              value="Emitida"
+              ${record.status==='Emitida'?'selected':''}
+            >
+              Emitida
+            </option>
+
+            <option
+              value="Pendiente de pago"
+              ${record.status==='Pendiente de pago'?'selected':''}
+            >
+              Pendiente de pago
+            </option>
+
+            <option
+              value="Pagada"
+              ${record.status==='Pagada'?'selected':''}
+            >
+              Pagada
+            </option>
+
+          </select>
+
+        </td>
+
+
+        <td>
+          ${units}
+        </td>
+
+
+        <td class="money">
+          ${money(record.subtotal)}
+        </td>
+
+
+        <td class="money">
+          ${money(record.iva)}
+        </td>
+
+
+        <td class="money">
+          <strong>
+            ${money(record.totalRevenue)}
+          </strong>
+        </td>
+
+
+        <td class="${
+          record.totalProfit >= 0
+          ?
+          'good'
+          :
+          'low-stock'
+        }">
+
+          ${money(record.totalProfit)}
+
+        </td>
+
+
+        <td>
+
+          ${
+            record.fileId
+            ?
+            `<button
+              class="file-link"
+              onclick="
+                openInvoiceFile(
+                  '${record.fileId}'
+                )
+              "
+            >
+              ${esc(
+                record.fileName
+                ||
+                'Ver factura'
+              )}
+            </button>`
+            :
+            '—'
+          }
+
+        </td>
+
+      </tr>
+      `;
+
+    }).join('')
+    ||
+    '<tr><td colspan="10">Aún no hay ventas registradas.</td></tr>';
+};
+
+
+/* ========================================================
+   REPORTES CON TOTAL CON IVA
+======================================================== */
+
+if(typeof renderReports === 'function'){
+
+  const v5PreviousReports =
+    renderReports;
+
+
+  renderReports = function(){
+
+    v5NormalizeSales();
+
+    v5PreviousReports();
+
+
+    const salesTotal =
+      saleRecords.reduce(
+        (sum,item) =>
+          sum
+          +
+          Number(
+            item.totalRevenue || 0
+          ),
+        0
+      );
+
+
+    const costTotal =
+      saleRecords.reduce(
+        (sum,item) =>
+          sum
+          +
+          Number(
+            item.totalCost || 0
+          ),
+        0
+      );
+
+
+    const profitTotal =
+      saleRecords.reduce(
+        (sum,item) =>
+          sum
+          +
+          Number(
+            item.totalProfit || 0
+          ),
+        0
+      );
+
+
+    const salesEl =
+      document.getElementById(
+        'reportSales'
+      );
+
+
+    const costEl =
+      document.getElementById(
+        'reportCost'
+      );
+
+
+    const profitEl =
+      document.getElementById(
+        'reportProfit'
+      );
+
+
+    if(salesEl){
+      salesEl.textContent =
+        money(salesTotal);
+    }
+
+
+    if(costEl){
+      costEl.textContent =
+        money(costTotal);
+    }
+
+
+    if(profitEl){
+      profitEl.textContent =
+        money(profitTotal);
+    }
+
+
+    /*
+      TABLA DE VENTAS DEL REPORTE
+    */
+
+    const reportSalesTable =
+      document.getElementById(
+        'reportSalesTable'
+      );
+
+
+    if(reportSalesTable){
+
+      const header =
+        reportSalesTable
+        .closest('table')
+        ?.querySelector(
+          'thead tr'
+        );
+
+
+      if(header){
+
+        header.innerHTML = `
+
+          <th>Fecha</th>
+          <th>Factura</th>
+          <th>Cliente</th>
+          <th>Status</th>
+          <th>Subtotal</th>
+          <th>IVA</th>
+          <th>Total</th>
+          <th>Utilidad</th>
+        `;
+      }
+
+
+      reportSalesTable.innerHTML =
+        saleRecords.map(item=>`
+
+          <tr>
+
+            <td>
+              ${esc(item.date || '')}
+            </td>
+
+            <td>
+              ${esc(item.invoiceNo || '')}
+            </td>
+
+            <td>
+              ${esc(item.customer || '')}
+            </td>
+
+            <td>
+              ${esc(item.status || '')}
+            </td>
+
+            <td class="money">
+              ${money(item.subtotal)}
+            </td>
+
+            <td class="money">
+              ${money(item.iva)}
+            </td>
+
+            <td class="money">
+              <strong>
+                ${money(item.totalRevenue)}
+              </strong>
+            </td>
+
+            <td class="${
+              item.totalProfit >= 0
+              ?
+              'good'
+              :
+              'low-stock'
+            }">
+              ${money(item.totalProfit)}
+            </td>
+
+          </tr>
+
+        `).join('')
+        ||
+        '<tr><td colspan="8">Sin ventas.</td></tr>';
+    }
+  };
+}
+
+
+/* ========================================================
+   EJECUTAR MIGRACIÓN AHORA
+======================================================== */
+
+v5NormalizeSales();
+
+renderSales();
+
+if(typeof renderReports === 'function'){
+  renderReports();
+}
+
+</script>
+
+<!-- === LABRU SALES V5 END === -->
+
 </body>
 </html>
