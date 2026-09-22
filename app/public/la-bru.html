@@ -8434,5 +8434,1035 @@ if(document.readyState === 'loading'){
 
 <!-- === LABRU V3 JS END === -->
 
+
+<!-- === LABRU INVENTORY V4 START === -->
+
+<script>
+
+/*
+===========================================================
+INVENTARIO V4
+
+Regla definitiva:
+
+SI EXISTEN ENTRADAS REGISTRADAS:
+    inventario = entradas - salidas
+
+SI TODAVÍA NO HAY ENTRADAS:
+    inventario = inventario inicial - salidas
+
+Esto evita duplicar:
+inventario inicial + compra registrada.
+===========================================================
+*/
+
+
+function v4Entries(productId,type){
+
+  return (entryRecords || [])
+    .filter(item =>
+      item.productId === productId
+      &&
+      item.inventoryType === type
+    )
+    .reduce(
+      (total,item) =>
+        total + Number(item.quantity || 0),
+      0
+    );
+}
+
+
+function v4Outputs(productId,type){
+
+  return (outputs || [])
+    .filter(item =>
+      item.productId === productId
+      &&
+      item.inventoryType === type
+    )
+    .reduce(
+      (total,item) =>
+        total + Number(item.quantity || 0),
+      0
+    );
+}
+
+
+function v4AllOutputs(productId){
+
+  return (outputs || [])
+    .filter(item =>
+      item.productId === productId
+    )
+    .reduce(
+      (total,item) =>
+        total + Number(item.quantity || 0),
+      0
+    );
+}
+
+
+/*
+REEMPLAZA LA FUNCIÓN DE EXISTENCIA ANTERIOR
+*/
+
+v3Stock = function(product){
+
+  const saleEntries =
+    v4Entries(
+      product.id,
+      'sale'
+    );
+
+  const freeEntries =
+    v4Entries(
+      product.id,
+      'free'
+    );
+
+
+  const saleOutputs =
+    v4Outputs(
+      product.id,
+      'sale'
+    );
+
+  const freeOutputs =
+    v4Outputs(
+      product.id,
+      'free'
+    );
+
+
+  /*
+    Cuando existen entradas de compra,
+    éstas se convierten en la fuente autoritativa.
+
+    El inventario inicial deja de sumarse.
+  */
+
+  const saleBase =
+    saleEntries > 0
+    ?
+    saleEntries
+    :
+    Number(
+      product.openingSale
+      ??
+      product.stockSale
+      ??
+      product.stock
+      ??
+      0
+    );
+
+
+  const freeBase =
+    freeEntries > 0
+    ?
+    freeEntries
+    :
+    Number(
+      product.openingFree
+      ??
+      product.stockFree
+      ??
+      0
+    );
+
+
+  const sale =
+    saleBase - saleOutputs;
+
+
+  const free =
+    freeBase - freeOutputs;
+
+
+  return {
+
+    sale:
+      Math.max(
+        0,
+        sale
+      ),
+
+    free:
+      Math.max(
+        0,
+        free
+      ),
+
+    rawSale:
+      sale,
+
+    rawFree:
+      free,
+
+    saleEntries,
+
+    freeEntries,
+
+    saleOutputs,
+
+    freeOutputs
+  };
+};
+
+
+/*
+SINCRONIZAR TODOS LOS PRODUCTOS
+*/
+
+function v4SyncInventory(){
+
+  for(const product of products){
+
+    const stock =
+      v3Stock(product);
+
+    product.stockSale =
+      stock.sale;
+
+    product.stockFree =
+      stock.free;
+  }
+
+
+  localStorage.setItem(
+    productKey,
+    JSON.stringify(products)
+  );
+}
+
+
+/*
+===========================================================
+INVENTARIO · TABLA
+===========================================================
+*/
+
+renderInventory = function(){
+
+  v4SyncInventory();
+
+
+  const table =
+    document.getElementById(
+      'inventoryTable'
+    );
+
+  if(!table)return;
+
+
+  const header =
+    table
+      .closest('table')
+      ?.querySelector(
+        'thead tr'
+      );
+
+
+  if(header){
+
+    header.innerHTML = `
+
+      <th>Producto</th>
+
+      <th>
+        Para venta
+      </th>
+
+      <th>
+        Sin cargo
+      </th>
+
+      <th>
+        Salida
+      </th>
+
+      <th>
+        Total actual
+      </th>
+
+      <th>
+        Mínimo venta
+      </th>
+
+      <th>
+        Estado
+      </th>
+
+      <th>
+        Valor comprado
+      </th>
+
+      <th></th>
+    `;
+  }
+
+
+  table.innerHTML =
+    products
+    .map(product=>{
+
+      const stock =
+        v3Stock(product);
+
+
+      const totalOutputs =
+        v4AllOutputs(
+          product.id
+        );
+
+
+      const cost =
+        pricing(
+          product.cost
+        ).purchaseFinal;
+
+
+      const purchasedValue =
+        stock.sale * cost;
+
+
+      const low =
+        stock.sale
+        <=
+        Number(
+          product.minimum || 0
+        );
+
+
+      return `
+
+      <tr
+        class="inventory-clickable"
+        onclick="
+          v4OpenInventory(
+            '${product.id}'
+          )
+        "
+      >
+
+        <td>
+
+          <strong>
+            ${esc(product.name)}
+          </strong>
+
+          <br>
+
+          <small>
+            ${esc(product.sku || '')}
+          </small>
+
+        </td>
+
+
+        <td>
+
+          <strong>
+            ${stock.sale}
+          </strong>
+
+          ${
+            stock.saleEntries > 0
+            ?
+            `<br>
+             <small style="color:#6f685c">
+               Entradas ${stock.saleEntries}
+             </small>`
+            :
+            ''
+          }
+
+        </td>
+
+
+        <td style="color:var(--gold2)">
+
+          <strong>
+            ${stock.free}
+          </strong>
+
+          ${
+            stock.freeEntries > 0
+            ?
+            `<br>
+             <small style="color:#6f685c">
+               Entradas ${stock.freeEntries}
+             </small>`
+            :
+            ''
+          }
+
+        </td>
+
+
+        <td>
+
+          <strong style="color:#d59086">
+            ${totalOutputs}
+          </strong>
+
+          <br>
+
+          <small style="color:#6f685c">
+            Venta ${stock.saleOutputs}
+            ·
+            SC ${stock.freeOutputs}
+          </small>
+
+        </td>
+
+
+        <td>
+
+          <strong>
+            ${stock.sale + stock.free}
+          </strong>
+
+        </td>
+
+
+        <td>
+
+          ${Number(
+            product.minimum || 0
+          )}
+
+        </td>
+
+
+        <td class="${
+          low
+          ?
+          'low-stock'
+          :
+          'good'
+        }">
+
+          ${
+            low
+            ?
+            'Stock venta bajo'
+            :
+            'Disponible'
+          }
+
+        </td>
+
+
+        <td class="money">
+
+          ${money(
+            purchasedValue
+          )}
+
+        </td>
+
+
+        <td>
+
+          <button
+            class="inventory-edit-button"
+            onclick="
+              event.stopPropagation();
+              v4OpenInventory(
+                '${product.id}'
+              );
+            "
+          >
+            Editar
+          </button>
+
+        </td>
+
+      </tr>
+      `;
+
+    })
+    .join('')
+    ||
+    '<tr><td colspan="9">Aún no hay inventario.</td></tr>';
+};
+
+
+/*
+===========================================================
+EDICIÓN DE INVENTARIO
+===========================================================
+*/
+
+function v4OpenInventory(productId){
+
+  const product =
+    products.find(
+      item =>
+        item.id === productId
+    );
+
+  if(!product)return;
+
+
+  const stock =
+    v3Stock(product);
+
+
+  document.getElementById(
+    'inventoryEditProductId'
+  ).value =
+    product.id;
+
+
+  document.getElementById(
+    'inventoryEditTitle'
+  ).textContent =
+    product.name;
+
+
+  document.getElementById(
+    'inventoryEditSale'
+  ).value =
+    stock.sale;
+
+
+  document.getElementById(
+    'inventoryEditFree'
+  ).value =
+    stock.free;
+
+
+  document.getElementById(
+    'inventoryReconcileInfo'
+  ).innerHTML = `
+
+    <strong>
+      Inventario cotejado por movimientos
+    </strong>
+
+
+    <div class="reconcile-grid">
+
+      <div class="reconcile-item">
+
+        <span>
+          Entradas para venta
+        </span>
+
+        <b>
+          ${stock.saleEntries}
+        </b>
+
+      </div>
+
+
+      <div class="reconcile-item">
+
+        <span>
+          Salidas para venta
+        </span>
+
+        <b>
+          ${stock.saleOutputs}
+        </b>
+
+      </div>
+
+
+      <div class="reconcile-item">
+
+        <span>
+          Entradas sin cargo
+        </span>
+
+        <b>
+          ${stock.freeEntries}
+        </b>
+
+      </div>
+
+
+      <div class="reconcile-item">
+
+        <span>
+          Salidas sin cargo
+        </span>
+
+        <b>
+          ${stock.freeOutputs}
+        </b>
+
+      </div>
+
+    </div>
+
+
+    <div style="
+      margin-top:12px;
+      padding-top:11px;
+      border-top:1px solid var(--line);
+      color:#978f80;
+      font-size:11px;
+      line-height:1.55;
+    ">
+
+      Existencia actual:
+
+      <strong style="color:var(--text)">
+        ${stock.sale} para venta
+      </strong>
+
+      +
+
+      <strong style="color:var(--gold2)">
+        ${stock.free} sin cargo
+      </strong>
+
+      <br><br>
+
+      Cuando existen entradas registradas,
+      el inventario se obtiene exclusivamente de:
+
+      <strong style="color:var(--text)">
+        Entradas − Salidas
+      </strong>.
+
+      Ya no se suma el inventario inicial manual.
+
+    </div>
+  `;
+
+
+  document
+    .getElementById(
+      'inventoryEditModal'
+    )
+    .classList
+    .remove(
+      'hidden'
+    );
+}
+
+
+/*
+===========================================================
+GUARDAR EDICIÓN
+
+Sólo permite REDUCIR el inventario actual.
+
+Para AUMENTAR:
+debe existir una compra / entrada.
+===========================================================
+*/
+
+v3SaveInventoryEdit = function(){
+
+  const productId =
+    document.getElementById(
+      'inventoryEditProductId'
+    ).value;
+
+
+  const product =
+    products.find(
+      item =>
+        item.id === productId
+    );
+
+
+  if(!product)return;
+
+
+  const current =
+    v3Stock(product);
+
+
+  const desiredSale =
+    Number(
+      document.getElementById(
+        'inventoryEditSale'
+      ).value
+    );
+
+
+  const desiredFree =
+    Number(
+      document.getElementById(
+        'inventoryEditFree'
+      ).value
+    );
+
+
+  if(
+    desiredSale < 0
+    ||
+    desiredFree < 0
+  ){
+
+    alert(
+      'El inventario no puede ser negativo.'
+    );
+
+    return;
+  }
+
+
+  /*
+    BLOQUEAR AUMENTOS MANUALES
+  */
+
+  if(
+    desiredSale
+    >
+    current.sale
+    ||
+    desiredFree
+    >
+    current.free
+  ){
+
+    alert(
+      'No se puede aumentar el inventario manualmente.\n\n'
+      +
+      'Para aumentar existencia debe registrarse una '
+      +
+      'Compra / Entrada.'
+    );
+
+    return;
+  }
+
+
+  const saleDifference =
+    current.sale
+    -
+    desiredSale;
+
+
+  const freeDifference =
+    current.free
+    -
+    desiredFree;
+
+
+  /*
+    REDUCCIÓN = SALIDA DE AJUSTE
+  */
+
+  if(
+    saleDifference > 0
+  ){
+
+    outputs.unshift({
+
+      id:
+        crypto.randomUUID(),
+
+      productId:
+        product.id,
+
+      productName:
+        product.name,
+
+      inventoryType:
+        'sale',
+
+      quantity:
+        saleDifference,
+
+      reason:
+        'Ajuste de inventario',
+
+      date:
+        new Date()
+        .toISOString()
+        .slice(0,10),
+
+      destination:
+        'Conciliación de inventario',
+
+      notes:
+        'Ajuste manual validado contra entradas y salidas.',
+
+      createdAt:
+        new Date()
+        .toISOString()
+    });
+  }
+
+
+  if(
+    freeDifference > 0
+  ){
+
+    outputs.unshift({
+
+      id:
+        crypto.randomUUID(),
+
+      productId:
+        product.id,
+
+      productName:
+        product.name,
+
+      inventoryType:
+        'free',
+
+      quantity:
+        freeDifference,
+
+      reason:
+        'Ajuste de inventario',
+
+      date:
+        new Date()
+        .toISOString()
+        .slice(0,10),
+
+      destination:
+        'Conciliación de inventario',
+
+      notes:
+        'Ajuste manual validado contra entradas y salidas.',
+
+      createdAt:
+        new Date()
+        .toISOString()
+    });
+  }
+
+
+  localStorage.setItem(
+    outputKey,
+    JSON.stringify(outputs)
+  );
+
+
+  v4SyncInventory();
+
+
+  v3CloseInventoryEdit();
+
+
+  renderAll();
+
+
+  setView(
+    'inventory'
+  );
+};
+
+
+/*
+===========================================================
+PRODUCTOS
+
+Usa exactamente la misma existencia del inventario.
+===========================================================
+*/
+
+renderProducts = function(){
+
+  v4SyncInventory();
+
+
+  const search =
+    (
+      document.getElementById(
+        'productSearch'
+      )?.value
+      ||
+      ''
+    )
+    .toLowerCase();
+
+
+  const rows =
+    products
+    .filter(product =>
+
+      (
+        product.name
+        +
+        ' '
+        +
+        product.sku
+      )
+      .toLowerCase()
+      .includes(
+        search
+      )
+    )
+    .map(product=>{
+
+      const stock =
+        v3Stock(product);
+
+
+      const prices =
+        pricing(
+          product.cost
+        );
+
+
+      return `
+
+      <tr>
+
+        <td>
+          ${esc(
+            product.sku || '—'
+          )}
+        </td>
+
+
+        <td>
+
+          <strong>
+            ${esc(
+              product.name
+            )}
+          </strong>
+
+          <br>
+
+          <small>
+            ${esc(
+              product.presentation || ''
+            )}
+          </small>
+
+        </td>
+
+
+        <td class="${
+          stock.sale
+          <=
+          Number(
+            product.minimum || 0
+          )
+          ?
+          'low-stock'
+          :
+          'good'
+        }">
+
+          <strong>
+            ${stock.sale + stock.free}
+          </strong>
+
+          <br>
+
+          <small>
+            Venta ${stock.sale}
+            ·
+            SC ${stock.free}
+            ·
+            Salidas ${
+              stock.saleOutputs
+              +
+              stock.freeOutputs
+            }
+          </small>
+
+        </td>
+
+
+        <td class="money">
+          ${money(
+            product.cost
+          )}
+        </td>
+
+
+        <td class="money">
+          ${money(
+            prices.purchaseFinal
+          )}
+        </td>
+
+
+        <td class="money">
+
+          ${money(
+            pricing(
+              product.cost,
+              .10
+            ).final
+          )}
+
+        </td>
+
+
+        <td class="money">
+
+          ${money(
+            pricing(
+              product.cost,
+              .20
+            ).final
+          )}
+
+        </td>
+
+
+        <td class="money">
+
+          ${money(
+            pricing(
+              product.cost,
+              .30
+            ).final
+          )}
+
+        </td>
+
+      </tr>
+      `;
+
+    })
+    .join('');
+
+
+  document.getElementById(
+    'productsTable'
+  ).innerHTML =
+    rows
+    ||
+    '<tr><td colspan="8">Aún no hay productos.</td></tr>';
+
+
+  updateQuoteProducts();
+
+
+  if(
+    typeof updateOutputProducts
+    ===
+    'function'
+  ){
+
+    updateOutputProducts();
+  }
+};
+
+
+/*
+===========================================================
+FORZAR SINCRONIZACIÓN AL CARGAR
+===========================================================
+*/
+
+v4SyncInventory();
+
+renderAll();
+
+</script>
+
+<!-- === LABRU INVENTORY V4 END === -->
+
 </body>
 </html>
