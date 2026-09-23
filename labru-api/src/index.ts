@@ -4,344 +4,518 @@ interface Env {
   LABRU_PIN: string;
 }
 
-const ALLOWED_ORIGINS = [
-  "https://mackavi.pulsosolucion.com",
-  "https://zoe-delivery-control.pages.dev",
-  "http://localhost:5173",
-  "http://127.0.0.1:5173"
+const STATE_KEYS = [
+  "products",
+  "clients",
+  "purchases",
+  "entries",
+  "sales",
+  "outputs"
 ];
 
 function cors(request: Request) {
-  const origin = request.headers.get("Origin") || "";
+  const origin =
+    request.headers.get("Origin") || "";
 
-  const allowed =
-    ALLOWED_ORIGINS.includes(origin)
-      ? origin
-      : "https://mackavi.pulsosolucion.com";
+  let allowedOrigin =
+    "https://mackavi.pulsosolucion.com";
+
+  if (
+    origin === "https://mackavi.pulsosolucion.com" ||
+    origin === "https://zoe-delivery-control.pages.dev" ||
+    origin.endsWith(".zoe-delivery-control.pages.dev") ||
+    origin === "http://localhost:5173" ||
+    origin === "http://127.0.0.1:5173"
+  ) {
+    allowedOrigin = origin;
+  }
 
   return {
-    "Access-Control-Allow-Origin": allowed,
-    "Access-Control-Allow-Methods": "GET,PUT,POST,OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type,X-LaBru-Pin",
-    "Access-Control-Expose-Headers": "Content-Disposition",
+    "Access-Control-Allow-Origin": allowedOrigin,
+    "Access-Control-Allow-Methods":
+      "GET,POST,PUT,OPTIONS",
+    "Access-Control-Allow-Headers":
+      "Content-Type,X-LaBru-Pin",
+    "Access-Control-Expose-Headers":
+      "Content-Disposition",
+    "Cache-Control": "no-store",
     "Vary": "Origin"
   };
 }
 
 function json(
   request: Request,
-  data: unknown,
+  body: unknown,
   status = 200
 ) {
   return new Response(
-    JSON.stringify(data),
+    JSON.stringify(body, null, 2),
     {
       status,
       headers: {
         ...cors(request),
-        "Content-Type": "application/json; charset=utf-8",
-        "Cache-Control": "no-store"
+        "Content-Type":
+          "application/json; charset=utf-8"
       }
     }
   );
 }
 
-function authorized(request: Request, env: Env) {
+function isAuthorized(
+  request: Request,
+  env: Env
+) {
   return (
     request.headers.get("X-LaBru-Pin")
-    === env.LABRU_PIN
+    ===
+    env.LABRU_PIN
   );
 }
 
-async function ensureSchema(env: Env) {
-  await env.DB.exec(`
-    CREATE TABLE IF NOT EXISTS labru_state (
-      key TEXT PRIMARY KEY,
-      data TEXT NOT NULL,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
+async function readState(env: Env) {
 
-    CREATE TABLE IF NOT EXISTS labru_sync_log (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      action TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-  `);
+  const result =
+    await env.DB
+      .prepare(`
+        SELECT
+          key,
+          data,
+          updated_at
+        FROM labru_state
+        ORDER BY key
+      `)
+      .all();
+
+  const state: Record<string, any> = {
+    products: [],
+    clients: [],
+    purchases: [],
+    entries: [],
+    sales: [],
+    outputs: []
+  };
+
+  let latest: string | null = null;
+
+  for (const row of result.results as any[]) {
+
+    try {
+      state[row.key] =
+        JSON.parse(row.data);
+    } catch {
+      state[row.key] = [];
+    }
+
+    if (
+      row.updated_at &&
+      (
+        !latest ||
+        String(row.updated_at) > latest
+      )
+    ) {
+      latest =
+        String(row.updated_at);
+    }
+  }
+
+  const counts: Record<string, number> = {};
+
+  for (const key of STATE_KEYS) {
+    counts[key] =
+      Array.isArray(state[key])
+        ? state[key].length
+        : 0;
+  }
+
+  return {
+    state,
+    counts,
+    updatedAt: latest
+  };
 }
 
 export default {
+
   async fetch(
     request: Request,
     env: Env
   ): Promise<Response> {
 
-    const url = new URL(request.url);
+    try {
 
-    if (request.method === "OPTIONS") {
-      return new Response(null, {
-        status: 204,
-        headers: cors(request)
-      });
-    }
-
-    if (url.pathname === "/health") {
-      return json(request, {
-        ok: true,
-        service: "mackavi-la-bru-api"
-      });
-    }
-
-    if (!authorized(request, env)) {
-      return json(
-        request,
-        { error: "Unauthorized" },
-        401
-      );
-    }
-
-    await ensureSchema(env);
+      const url =
+        new URL(request.url);
 
 
-    // ==========================================
-    // SNAPSHOT COMPLETO
-    // ==========================================
+      // =========================================
+      // CORS
+      // =========================================
 
-    if (
-      url.pathname === "/api/state"
-      &&
-      request.method === "GET"
-    ) {
+      if (request.method === "OPTIONS") {
 
-      const result = await env.DB
-        .prepare(`
-          SELECT key, data, updated_at
-          FROM labru_state
-        `)
-        .all();
-
-      const state: Record<string, unknown> = {};
-
-      let latestUpdatedAt: string | null = null;
-
-      for (const row of result.results as any[]) {
-        try {
-          state[row.key] = JSON.parse(row.data);
-        } catch {
-          state[row.key] = [];
-        }
-
-        if (
-          !latestUpdatedAt
-          ||
-          row.updated_at > latestUpdatedAt
-        ) {
-          latestUpdatedAt = row.updated_at;
-        }
-      }
-
-      return json(request, {
-        state,
-        updatedAt: latestUpdatedAt
-      });
-    }
-
-
-    if (
-      url.pathname === "/api/state"
-      &&
-      request.method === "PUT"
-    ) {
-
-      const body: any =
-        await request.json();
-
-      const state =
-        body?.state || {};
-
-      const allowedKeys = [
-        "products",
-        "clients",
-        "purchases",
-        "entries",
-        "sales",
-        "outputs"
-      ];
-
-      const statements = [];
-
-      for (const key of allowedKeys) {
-
-        if (!(key in state)) {
-          continue;
-        }
-
-        statements.push(
-          env.DB
-            .prepare(`
-              INSERT INTO labru_state (
-                key,
-                data,
-                updated_at
-              )
-              VALUES (
-                ?,
-                ?,
-                CURRENT_TIMESTAMP
-              )
-              ON CONFLICT(key)
-              DO UPDATE SET
-                data = excluded.data,
-                updated_at = CURRENT_TIMESTAMP
-            `)
-            .bind(
-              key,
-              JSON.stringify(state[key] ?? [])
-            )
+        return new Response(
+          null,
+          {
+            status: 204,
+            headers: cors(request)
+          }
         );
       }
 
-      if (statements.length) {
-        await env.DB.batch(statements);
+
+      // =========================================
+      // HEALTH
+      // =========================================
+
+      if (url.pathname === "/health") {
+
+        return json(
+          request,
+          {
+            ok: true,
+            service: "mackavi-la-bru-api",
+            version: "2.1",
+            hasDB: !!env.DB,
+            hasR2: !!env.FILES,
+            hasPin: !!env.LABRU_PIN
+          }
+        );
       }
 
-      await env.DB
-        .prepare(`
-          INSERT INTO labru_sync_log (action)
-          VALUES ('state_sync')
-        `)
-        .run();
 
-      return json(request, {
-        ok: true
-      });
-    }
+      // =========================================
+      // AUTH
+      // =========================================
+
+      if (!isAuthorized(request, env)) {
+
+        return json(
+          request,
+          {
+            ok: false,
+            error: "Unauthorized"
+          },
+          401
+        );
+      }
 
 
-    // ==========================================
-    // ARCHIVOS R2
-    // ==========================================
+      // =========================================
+      // DEBUG D1
+      // =========================================
 
-    if (
-      url.pathname === "/api/file"
-      &&
-      request.method === "POST"
-    ) {
+      if (url.pathname === "/debug/d1") {
 
-      const form =
-        await request.formData();
+        if (!env.DB) {
 
-      const file =
-        form.get("file");
+          return json(
+            request,
+            {
+              ok: false,
+              error: "D1 binding DB is undefined"
+            },
+            500
+          );
+        }
+
+        const test =
+          await env.DB
+            .prepare(`
+              SELECT
+                1 AS ok,
+                datetime('now') AS current_time
+            `)
+            .first();
+
+        const tables =
+          await env.DB
+            .prepare(`
+              SELECT name
+              FROM sqlite_master
+              WHERE type='table'
+              AND name LIKE 'labru_%'
+              ORDER BY name
+            `)
+            .all();
+
+        return json(
+          request,
+          {
+            ok: true,
+            d1: test,
+            tables: tables.results
+          }
+        );
+      }
+
+
+      // =========================================
+      // GET STATE
+      // =========================================
 
       if (
-        !file
-        ||
-        typeof file === "string"
+        url.pathname === "/api/state" &&
+        request.method === "GET"
       ) {
+
+        const state =
+          await readState(env);
+
         return json(
           request,
-          { error: "File required" },
-          400
+          {
+            ok: true,
+            ...state
+          }
         );
       }
 
-      const id =
-        crypto.randomUUID();
 
-      const key =
-        `labru/${id}`;
+      // =========================================
+      // PUT STATE
+      // =========================================
 
-      await env.FILES.put(
-        key,
-        file.stream(),
-        {
-          httpMetadata: {
-            contentType:
-              file.type
-              ||
-              "application/octet-stream"
-          },
-          customMetadata: {
+      if (
+        url.pathname === "/api/state" &&
+        request.method === "PUT"
+      ) {
+
+        const body: any =
+          await request.json();
+
+        const incoming =
+          body?.state || {};
+
+        const now =
+          new Date().toISOString();
+
+        const statements = [];
+
+        for (const key of STATE_KEYS) {
+
+          if (!(key in incoming)) {
+            continue;
+          }
+
+          statements.push(
+            env.DB
+              .prepare(`
+                INSERT INTO labru_state (
+                  key,
+                  data,
+                  updated_at
+                )
+                VALUES (?, ?, ?)
+
+                ON CONFLICT(key)
+                DO UPDATE SET
+                  data = excluded.data,
+                  updated_at = excluded.updated_at
+              `)
+              .bind(
+                key,
+                JSON.stringify(
+                  incoming[key] ?? []
+                ),
+                now
+              )
+          );
+        }
+
+        if (statements.length) {
+
+          await env.DB.batch(
+            statements
+          );
+        }
+
+        await env.DB
+          .prepare(`
+            INSERT INTO labru_sync_log (
+              action,
+              created_at
+            )
+            VALUES (?, ?)
+          `)
+          .bind(
+            "state_sync",
+            now
+          )
+          .run();
+
+        return json(
+          request,
+          {
+            ok: true,
+            ...(await readState(env))
+          }
+        );
+      }
+
+
+      // =========================================
+      // FILE UPLOAD
+      // =========================================
+
+      if (
+        url.pathname === "/api/file" &&
+        request.method === "POST"
+      ) {
+
+        const form =
+          await request.formData();
+
+        const file =
+          form.get("file");
+
+        if (
+          !file ||
+          typeof file === "string"
+        ) {
+
+          return json(
+            request,
+            {
+              ok: false,
+              error: "File required"
+            },
+            400
+          );
+        }
+
+        const id =
+          crypto.randomUUID();
+
+        const key =
+          `labru/${id}`;
+
+        await env.FILES.put(
+          key,
+          file.stream(),
+          {
+            httpMetadata: {
+              contentType:
+                file.type ||
+                "application/octet-stream"
+            },
+
+            customMetadata: {
+              name: file.name
+            }
+          }
+        );
+
+        return json(
+          request,
+          {
+            ok: true,
+            id,
             name: file.name
           }
+        );
+      }
+
+
+      // =========================================
+      // FILE GET
+      // =========================================
+
+      if (
+        url.pathname.startsWith(
+          "/api/file/"
+        ) &&
+        request.method === "GET"
+      ) {
+
+        const id =
+          url.pathname
+            .slice(
+              "/api/file/".length
+            )
+            .trim();
+
+        const object =
+          await env.FILES.get(
+            `labru/${id}`
+          );
+
+        if (!object) {
+
+          return json(
+            request,
+            {
+              ok: false,
+              error: "File not found"
+            },
+            404
+          );
         }
-      );
 
-      return json(request, {
-        ok: true,
-        id,
-        name: file.name
-      });
-    }
+        const headers =
+          new Headers(
+            cors(request)
+          );
 
-
-    if (
-      url.pathname.startsWith("/api/file/")
-      &&
-      request.method === "GET"
-    ) {
-
-      const id =
-        url.pathname
-          .replace("/api/file/", "")
-          .trim();
-
-      if (!id) {
-        return json(
-          request,
-          { error: "Invalid file id" },
-          400
-        );
-      }
-
-      const object =
-        await env.FILES.get(
-          `labru/${id}`
-        );
-
-      if (!object) {
-        return json(
-          request,
-          { error: "File not found" },
-          404
-        );
-      }
-
-      const headers =
-        new Headers(
-          cors(request)
-        );
-
-      object.writeHttpMetadata(headers);
-
-      headers.set(
-        "Cache-Control",
-        "private, no-store"
-      );
-
-      const name =
-        object.customMetadata?.name
-        ||
-        "factura";
-
-      headers.set(
-        "Content-Disposition",
-        `inline; filename*=UTF-8''${encodeURIComponent(name)}`
-      );
-
-      return new Response(
-        object.body,
-        {
+        object.writeHttpMetadata(
           headers
-        }
+        );
+
+        const fileName =
+          object.customMetadata?.name ||
+          "factura";
+
+        headers.set(
+          "Content-Disposition",
+          `inline; filename*=UTF-8''${encodeURIComponent(fileName)}`
+        );
+
+        return new Response(
+          object.body,
+          {
+            headers
+          }
+        );
+      }
+
+
+      return json(
+        request,
+        {
+          ok: false,
+          error: "Not found"
+        },
+        404
+      );
+
+
+    } catch (error: any) {
+
+      console.error(
+        "LA BRU WORKER ERROR:",
+        error
+      );
+
+      /*
+        Ahora Cloudflare NO devolverá solamente 1101.
+        Veremos el error exacto en JSON.
+      */
+
+      return json(
+        request,
+        {
+          ok: false,
+          error:
+            error?.message ||
+            String(error),
+
+          name:
+            error?.name || null,
+
+          stack:
+            error?.stack || null
+        },
+        500
       );
     }
-
-
-    return json(
-      request,
-      { error: "Not found" },
-      404
-    );
   }
 };

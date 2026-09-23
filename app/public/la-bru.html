@@ -10117,144 +10117,205 @@ if(typeof renderReports === 'function'){
 <!-- === LABRU SALES V5 END === -->
 
 
-<!-- === LABRU CLOUD SYNC V1 START === -->
+
+
+
+<!-- === LABRU CLOUD SYNC V2 START === -->
+
+<style>
+
+.labru-cloud-status{
+  min-height:30px;
+  padding:0 10px;
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  border:1px solid var(--line);
+  border-radius:999px;
+  color:#7e776a;
+  font-size:9px;
+  font-weight:650;
+  letter-spacing:.03em;
+  white-space:nowrap;
+}
+
+.labru-cloud-status::before{
+  content:"";
+  width:5px;
+  height:5px;
+  border-radius:50%;
+  background:#777064;
+}
+
+.labru-cloud-status.ok{
+  color:#8ec99c;
+}
+
+.labru-cloud-status.ok::before{
+  background:#80c795;
+}
+
+.labru-cloud-status.saving{
+  color:#d2b06d;
+}
+
+.labru-cloud-status.saving::before{
+  background:#d9b66b;
+}
+
+.labru-cloud-status.error{
+  color:#d98e87;
+}
+
+.labru-cloud-status.error::before{
+  background:#e48b83;
+}
+
+@media(max-width:760px){
+  .labru-cloud-status{
+    display:none;
+  }
+}
+
+</style>
+
 
 <script>
 
-const LABRU_CLOUD_API =
+const LABRU_API_V2 =
   'https://mackavi-la-bru-api.marco-cruz.workers.dev';
 
-const LABRU_CLOUD_PIN =
+const LABRU_PIN_V2 =
   '0820';
 
-
-const LABRU_CLOUD_KEYS = {
-
-  products:
-    'labru_products_v1',
-
-  clients:
-    'labru_clients_v1',
-
-  purchases:
-    'labru_purchases_v2',
-
-  entries:
-    'labru_entries_v2',
-
-  sales:
-    'labru_sales_v2',
-
-  outputs:
-    'labru_outputs_v1'
+const LABRU_KEYS_V2 = {
+  products:'labru_products_v1',
+  clients:'labru_clients_v1',
+  purchases:'labru_purchases_v2',
+  entries:'labru_entries_v2',
+  sales:'labru_sales_v2',
+  outputs:'labru_outputs_v1'
 };
 
 
-let labruCloudApplying = false;
+let labruCloudReadyV2=false;
+let labruCloudApplyingV2=false;
+let labruCloudDirtyV2=false;
+let labruCloudTimerV2=null;
+let labruCloudPollingV2=false;
 
-let labruCloudTimer = null;
 
-let labruCloudReady = false;
-
-
-const labruNativeSetItem =
+const labruNativeSetV2 =
   Storage.prototype.setItem;
 
-
-const labruNativeRemoveItem =
+const labruNativeRemoveV2 =
   Storage.prototype.removeItem;
 
 
-/* ========================================================
-   HEADERS
-======================================================== */
+/* =======================================================
+   STATUS
+======================================================= */
 
-function labruCloudHeaders(
-  json = true
+function labruStatusV2(
+  text,
+  status=''
 ){
 
-  const headers = {
+  let element =
+    document.getElementById(
+      'labruCloudStatus'
+    );
+
+
+  if(!element){
+
+    const actions =
+      document.querySelector(
+        '.top-actions'
+      );
+
+
+    if(!actions){
+      return;
+    }
+
+
+    element =
+      document.createElement(
+        'div'
+      );
+
+
+    element.id =
+      'labruCloudStatus';
+
+
+    element.className =
+      'labru-cloud-status';
+
+
+    actions.prepend(
+      element
+    );
+  }
+
+
+  element.className =
+    'labru-cloud-status'
+    +
+    (
+      status
+      ?
+      ' '+status
+      :
+      ''
+    );
+
+
+  element.textContent =
+    text;
+}
+
+
+/* =======================================================
+   API
+======================================================= */
+
+function labruHeadersV2(
+  json=false
+){
+
+  const headers={
     'X-LaBru-Pin':
-      LABRU_CLOUD_PIN
+      LABRU_PIN_V2
   };
+
 
   if(json){
 
-    headers['Content-Type'] =
+    headers[
+      'Content-Type'
+    ] =
       'application/json';
   }
+
 
   return headers;
 }
 
 
-/* ========================================================
-   ESTADO LOCAL
-======================================================== */
-
-function labruReadLocalState(){
-
-  const state={};
-
-
-  for(
-    const [
-      cloudKey,
-      storageKey
-    ]
-    of Object.entries(
-      LABRU_CLOUD_KEYS
-    )
-  ){
-
-    try{
-
-      state[cloudKey] =
-        JSON.parse(
-          localStorage.getItem(
-            storageKey
-          )
-          ||
-          '[]'
-        );
-
-    } catch {
-
-      state[cloudKey]=[];
-    }
-  }
-
-
-  return state;
-}
-
-
-function labruHasData(state){
-
-  return Object
-    .values(state)
-    .some(value =>
-      Array.isArray(value)
-      &&
-      value.length > 0
-    );
-}
-
-
-/* ========================================================
-   API
-======================================================== */
-
-async function labruGetCloudState(){
+async function labruFetchCloudV2(){
 
   const response =
     await fetch(
-      LABRU_CLOUD_API
+      LABRU_API_V2
       +
-      '/api/state',
+      '/api/state?ts='
+      +
+      Date.now(),
       {
         headers:
-          labruCloudHeaders(false),
+          labruHeadersV2(),
 
         cache:
           'no-store'
@@ -10265,9 +10326,7 @@ async function labruGetCloudState(){
   if(!response.ok){
 
     throw new Error(
-      'Cloud state error: '
-      +
-      response.status
+      `Cloud GET ${response.status}`
     );
   }
 
@@ -10276,25 +10335,28 @@ async function labruGetCloudState(){
 }
 
 
-async function labruPutCloudState(
+async function labruSaveCloudV2(
   state
 ){
 
   const response =
     await fetch(
-      LABRU_CLOUD_API
+      LABRU_API_V2
       +
       '/api/state',
       {
         method:'PUT',
 
         headers:
-          labruCloudHeaders(true),
+          labruHeadersV2(true),
 
         body:
           JSON.stringify({
             state
-          })
+          }),
+
+        cache:
+          'no-store'
       }
     );
 
@@ -10302,9 +10364,7 @@ async function labruPutCloudState(
   if(!response.ok){
 
     throw new Error(
-      'Cloud save error: '
-      +
-      response.status
+      `Cloud PUT ${response.status}`
     );
   }
 
@@ -10313,125 +10373,245 @@ async function labruPutCloudState(
 }
 
 
-/* ========================================================
-   SINCRONIZAR
-======================================================== */
+/* =======================================================
+   ESTADO ACTUAL EN MEMORIA
 
-async function labruSyncNow(){
+   IMPORTANTE:
+   ya no leemos solamente localStorage.
+======================================================= */
 
-  if(
-    labruCloudApplying
-    ||
-    !labruCloudReady
-  ){
-    return;
-  }
+function labruMemoryStateV2(){
 
+  return {
 
-  try{
+    products:
+      Array.isArray(products)
+      ?
+      products
+      :
+      [],
 
-    const state =
-      labruReadLocalState();
+    clients:
+      Array.isArray(clients)
+      ?
+      clients
+      :
+      [],
 
+    purchases:
+      typeof purchaseRecords !== 'undefined'
+      &&
+      Array.isArray(purchaseRecords)
+      ?
+      purchaseRecords
+      :
+      [],
 
-    await labruPutCloudState(
-      state
-    );
+    entries:
+      typeof entryRecords !== 'undefined'
+      &&
+      Array.isArray(entryRecords)
+      ?
+      entryRecords
+      :
+      [],
 
+    sales:
+      typeof saleRecords !== 'undefined'
+      &&
+      Array.isArray(saleRecords)
+      ?
+      saleRecords
+      :
+      [],
 
-    console.log(
-      '[LaBru Cloud] sincronizado'
-    );
-
-  } catch(error){
-
-    console.error(
-      '[LaBru Cloud] error al guardar',
-      error
-    );
-  }
+    outputs:
+      Array.isArray(outputs)
+      ?
+      outputs
+      :
+      []
+  };
 }
 
 
-function labruScheduleSync(){
+function labruStateCountV2(
+  state
+){
 
-  clearTimeout(
-    labruCloudTimer
+  return Object
+    .values(state || {})
+    .reduce(
+      (total,value) =>
+        total
+        +
+        (
+          Array.isArray(value)
+          ?
+          value.length
+          :
+          0
+        ),
+      0
+    );
+}
+
+
+/* =======================================================
+   GUARDAR REMOTO EN LOCALSTORAGE SIN DISPARAR PUSH
+======================================================= */
+
+function labruWriteStorageV2(
+  state
+){
+
+  labruCloudApplyingV2=true;
+
+
+  for(
+    const [
+      key,
+      storageKey
+    ]
+    of Object.entries(
+      LABRU_KEYS_V2
+    )
+  ){
+
+    labruNativeSetV2.call(
+      localStorage,
+      storageKey,
+      JSON.stringify(
+        state[key] || []
+      )
+    );
+  }
+
+
+  labruCloudApplyingV2=false;
+}
+
+
+/* =======================================================
+   APLICAR ESTADO CLOUD TAMBIÉN A VARIABLES YA CARGADAS
+======================================================= */
+
+function labruApplyStateV2(
+  state
+){
+
+  labruCloudApplyingV2=true;
+
+
+  products =
+    Array.isArray(state.products)
+    ?
+    state.products
+    :
+    [];
+
+
+  clients =
+    Array.isArray(state.clients)
+    ?
+    state.clients
+    :
+    [];
+
+
+  if(
+    typeof purchaseRecords
+    !==
+    'undefined'
+  ){
+
+    purchaseRecords =
+      Array.isArray(state.purchases)
+      ?
+      state.purchases
+      :
+      [];
+  }
+
+
+  if(
+    typeof entryRecords
+    !==
+    'undefined'
+  ){
+
+    entryRecords =
+      Array.isArray(state.entries)
+      ?
+      state.entries
+      :
+      [];
+  }
+
+
+  if(
+    typeof saleRecords
+    !==
+    'undefined'
+  ){
+
+    saleRecords =
+      Array.isArray(state.sales)
+      ?
+      state.sales
+      :
+      [];
+  }
+
+
+  outputs =
+    Array.isArray(state.outputs)
+    ?
+    state.outputs
+    :
+    [];
+
+
+  labruWriteStorageV2(
+    state
   );
 
 
-  labruCloudTimer =
-    setTimeout(
-      labruSyncNow,
-      500
-    );
+  if(
+    typeof v4SyncInventory
+    ===
+    'function'
+  ){
+
+    v4SyncInventory();
+
+  } else if(
+    typeof v3SyncAllStocks
+    ===
+    'function'
+  ){
+
+    v3SyncAllStocks();
+  }
+
+
+  labruCloudApplyingV2=false;
+
+
+  if(
+    typeof renderAll
+    ===
+    'function'
+  ){
+
+    renderAll();
+  }
 }
 
 
-/* ========================================================
-   INTERCEPTAR CAMBIOS DE LOCALSTORAGE
-
-   El código existente puede seguir utilizando
-   localStorage. Ahora cada cambio se replica
-   automáticamente a Cloudflare D1.
-======================================================== */
-
-Storage.prototype.setItem =
-  function(key,value){
-
-    labruNativeSetItem.call(
-      this,
-      key,
-      value
-    );
-
-
-    if(
-      this === localStorage
-      &&
-      Object
-        .values(
-          LABRU_CLOUD_KEYS
-        )
-        .includes(key)
-      &&
-      !labruCloudApplying
-    ){
-
-      labruScheduleSync();
-    }
-  };
-
-
-Storage.prototype.removeItem =
-  function(key){
-
-    labruNativeRemoveItem.call(
-      this,
-      key
-    );
-
-
-    if(
-      this === localStorage
-      &&
-      Object
-        .values(
-          LABRU_CLOUD_KEYS
-        )
-        .includes(key)
-      &&
-      !labruCloudApplying
-    ){
-
-      labruScheduleSync();
-    }
-  };
-
-
-/* ========================================================
-   ARCHIVOS NUEVOS → R2
-======================================================== */
+/* =======================================================
+   ARCHIVOS R2
+======================================================= */
 
 saveInvoiceFile =
   async function(file){
@@ -10452,18 +10632,22 @@ saveInvoiceFile =
     );
 
 
+    labruStatusV2(
+      'Cloud · subiendo archivo',
+      'saving'
+    );
+
+
     const response =
       await fetch(
-        LABRU_CLOUD_API
+        LABRU_API_V2
         +
         '/api/file',
         {
           method:'POST',
 
-          headers:{
-            'X-LaBru-Pin':
-              LABRU_CLOUD_PIN
-          },
+          headers:
+            labruHeadersV2(),
 
           body:
             form
@@ -10473,8 +10657,14 @@ saveInvoiceFile =
 
     if(!response.ok){
 
+      labruStatusV2(
+        'Cloud · error',
+        'error'
+      );
+
+
       throw new Error(
-        'No fue posible subir la factura a Cloudflare.'
+        'No fue posible subir la factura.'
       );
     }
 
@@ -10508,16 +10698,17 @@ openInvoiceFile =
 
       const response =
         await fetch(
-          LABRU_CLOUD_API
+          LABRU_API_V2
           +
           '/api/file/'
           +
           encodeURIComponent(id),
           {
-            headers:{
-              'X-LaBru-Pin':
-                LABRU_CLOUD_PIN
-            }
+            headers:
+              labruHeadersV2(),
+
+            cache:
+              'no-store'
           }
         );
 
@@ -10525,7 +10716,7 @@ openInvoiceFile =
       if(!response.ok){
 
         throw new Error(
-          'Archivo no encontrado'
+          'Archivo remoto no encontrado'
         );
       }
 
@@ -10535,7 +10726,9 @@ openInvoiceFile =
 
 
       const url =
-        URL.createObjectURL(blob);
+        URL.createObjectURL(
+          blob
+        );
 
 
       window.open(
@@ -10545,26 +10738,32 @@ openInvoiceFile =
 
 
       setTimeout(
-        ()=>URL.revokeObjectURL(url),
+        ()=>{
+          URL.revokeObjectURL(
+            url
+          );
+        },
         60000
       );
+
 
     } catch(error){
 
       console.error(error);
 
+
       alert(
-        'No fue posible abrir el archivo desde Cloudflare.'
+        'No fue posible abrir la factura desde Cloudflare.'
       );
     }
   };
 
 
-/* ========================================================
-   MIGRAR ARCHIVOS EXISTENTES DE INDEXEDDB → R2
-======================================================== */
+/* =======================================================
+   MIGRAR ARCHIVOS LOCALES EXISTENTES
+======================================================= */
 
-async function labruGetLegacyFiles(){
+async function labruLegacyFilesV2(){
 
   return new Promise(resolve=>{
 
@@ -10575,154 +10774,97 @@ async function labruGetLegacyFiles(){
 
 
     request.onerror =
-      ()=>resolve([]);
-
-
-    request.onupgradeneeded =
       ()=>{
-
-        /*
-          Si no existía la base,
-          no hay archivos que migrar.
-        */
+        resolve([]);
       };
 
 
-    request.onsuccess = ()=>{
+    request.onsuccess =
+      ()=>{
 
-      const db =
-        request.result;
-
-
-      if(
-        !db.objectStoreNames.contains(
-          'files'
-        )
-      ){
-
-        db.close();
-
-        resolve([]);
-
-        return;
-      }
+        const db =
+          request.result;
 
 
-      const tx =
-        db.transaction(
-          'files',
-          'readonly'
-        );
+        if(
+          !db.objectStoreNames.contains(
+            'files'
+          )
+        ){
+
+          db.close();
+
+          resolve([]);
+
+          return;
+        }
 
 
-      const getAll =
-        tx
-          .objectStore('files')
+        const transaction =
+          db.transaction(
+            'files',
+            'readonly'
+          );
+
+
+        const getAll =
+          transaction
+          .objectStore(
+            'files'
+          )
           .getAll();
 
 
-      getAll.onsuccess = ()=>{
+        getAll.onsuccess =
+          ()=>{
 
-        db.close();
+            const result =
+              getAll.result || [];
 
-        resolve(
-          getAll.result || []
-        );
+            db.close();
+
+            resolve(
+              result
+            );
+          };
+
+
+        getAll.onerror =
+          ()=>{
+
+            db.close();
+
+            resolve([]);
+          };
       };
-
-
-      getAll.onerror = ()=>{
-
-        db.close();
-
-        resolve([]);
-      };
-    };
   });
 }
 
 
-async function labruUploadLegacyBlob(
-  record
-){
+async function labruMigrateFilesV2(){
 
-  const form =
-    new FormData();
+  const files =
+    await labruLegacyFilesV2();
 
 
-  const file =
-    new File(
-      [record.blob],
-      record.name || 'factura',
-      {
-        type:
-          record.type
-          ||
-          record.blob?.type
-          ||
-          'application/octet-stream'
-      }
-    );
-
-
-  form.append(
-    'file',
-    file,
-    file.name
-  );
-
-
-  const response =
-    await fetch(
-      LABRU_CLOUD_API
-      +
-      '/api/file',
-      {
-        method:'POST',
-
-        headers:{
-          'X-LaBru-Pin':
-            LABRU_CLOUD_PIN
-        },
-
-        body:
-          form
-      }
-    );
-
-
-  if(!response.ok){
-
-    throw new Error(
-      'Legacy file upload error'
-    );
+  if(!files.length){
+    return;
   }
 
 
-  return response.json();
-}
-
-
-async function labruMigrateLegacyFiles(){
-
   const state =
-    labruReadLocalState();
+    labruMemoryStateV2();
 
 
-  const purchases =
-    state.purchases || [];
+  const records = [
+    ...state.purchases,
+    ...state.sales
+  ];
 
 
-  const sales =
-    state.sales || [];
-
-
-  const referenced =
+  const usedIds =
     new Set(
-      [
-        ...purchases,
-        ...sales
-      ]
+      records
       .map(record =>
         record.fileId
       )
@@ -10730,60 +10872,84 @@ async function labruMigrateLegacyFiles(){
   );
 
 
-  if(!referenced.size){
-    return;
-  }
-
-
-  const localFiles =
-    await labruGetLegacyFiles();
-
-
-  if(!localFiles.length){
-    return;
-  }
-
-
   const mapping={};
 
 
-  for(const record of localFiles){
+  for(const record of files){
 
     if(
-      !referenced.has(
-        record.id
-      )
+      !record.id
+      ||
+      !record.blob
+      ||
+      !usedIds.has(record.id)
     ){
-      continue;
-    }
-
-
-    /*
-      IDs provenientes de R2 ya no necesitan
-      migración. Sólo subimos si existe blob local.
-    */
-
-    if(!record.blob){
       continue;
     }
 
 
     try{
 
-      const uploaded =
-        await labruUploadLegacyBlob(
-          record
+      const file =
+        new File(
+          [record.blob],
+          record.name || 'factura',
+          {
+            type:
+              record.type
+              ||
+              record.blob.type
+              ||
+              'application/octet-stream'
+          }
         );
+
+
+      const form =
+        new FormData();
+
+
+      form.append(
+        'file',
+        file,
+        file.name
+      );
+
+
+      const response =
+        await fetch(
+          LABRU_API_V2
+          +
+          '/api/file',
+          {
+            method:'POST',
+
+            headers:
+              labruHeadersV2(),
+
+            body:
+              form
+          }
+        );
+
+
+      if(!response.ok){
+        continue;
+      }
+
+
+      const uploaded =
+        await response.json();
 
 
       mapping[record.id] =
         uploaded.id;
 
+
     } catch(error){
 
       console.error(
-        'No se pudo migrar',
-        record.name,
+        'Migración archivo:',
         error
       );
     }
@@ -10797,211 +10963,384 @@ async function labruMigrateLegacyFiles(){
   }
 
 
-  let changed=false;
-
-
-  for(const purchase of purchases){
+  for(
+    const record
+    of state.purchases
+  ){
 
     if(
-      purchase.fileId
-      &&
-      mapping[purchase.fileId]
+      mapping[
+        record.fileId
+      ]
     ){
 
-      purchase.fileId =
+      record.fileId =
         mapping[
-          purchase.fileId
+          record.fileId
         ];
-
-      changed=true;
     }
   }
 
 
-  for(const sale of sales){
+  for(
+    const record
+    of state.sales
+  ){
 
     if(
-      sale.fileId
-      &&
-      mapping[sale.fileId]
+      mapping[
+        record.fileId
+      ]
     ){
 
-      sale.fileId =
+      record.fileId =
         mapping[
-          sale.fileId
+          record.fileId
         ];
-
-      changed=true;
     }
   }
 
 
-  if(changed){
+  labruWriteStorageV2(
+    state
+  );
+}
 
-    labruCloudApplying=true;
+
+/* =======================================================
+   PUSH
+======================================================= */
+
+async function labruPushV2(){
+
+  if(
+    !labruCloudReadyV2
+    ||
+    labruCloudApplyingV2
+  ){
+    return;
+  }
 
 
-    labruNativeSetItem.call(
-      localStorage,
-      LABRU_CLOUD_KEYS.purchases,
-      JSON.stringify(purchases)
+  labruCloudDirtyV2=true;
+
+
+  labruStatusV2(
+    'Cloud · guardando',
+    'saving'
+  );
+
+
+  try{
+
+    const result =
+      await labruSaveCloudV2(
+        labruMemoryStateV2()
+      );
+
+
+    labruCloudDirtyV2=false;
+
+
+    labruStatusV2(
+      'Cloud · actualizado',
+      'ok'
     );
 
 
-    labruNativeSetItem.call(
-      localStorage,
-      LABRU_CLOUD_KEYS.sales,
-      JSON.stringify(sales)
+    console.log(
+      '[LaBru Cloud V2] guardado',
+      result.counts
     );
 
 
-    labruCloudApplying=false;
+  } catch(error){
+
+    console.error(
+      '[LaBru Cloud V2] PUT',
+      error
+    );
+
+
+    labruStatusV2(
+      'Cloud · error',
+      'error'
+    );
   }
 }
 
 
-/* ========================================================
-   APLICAR CLOUD AL NAVEGADOR
-======================================================== */
+function labruSchedulePushV2(){
 
-function labruApplyCloudState(
-  remoteState
-){
-
-  let changed=false;
+  clearTimeout(
+    labruCloudTimerV2
+  );
 
 
-  labruCloudApplying=true;
+  labruCloudTimerV2 =
+    setTimeout(
+      labruPushV2,
+      400
+    );
+}
 
 
-  for(
-    const [
-      cloudKey,
-      storageKey
-    ]
-    of Object.entries(
-      LABRU_CLOUD_KEYS
-    )
+/* =======================================================
+   OBSERVAR GUARDADOS DEL CÓDIGO ACTUAL
+======================================================= */
+
+Storage.prototype.setItem =
+  function(key,value){
+
+    labruNativeSetV2.call(
+      this,
+      key,
+      value
+    );
+
+
+    if(
+      this === localStorage
+      &&
+      Object
+        .values(
+          LABRU_KEYS_V2
+        )
+        .includes(key)
+      &&
+      labruCloudReadyV2
+      &&
+      !labruCloudApplyingV2
+    ){
+
+      labruCloudDirtyV2=true;
+
+      labruSchedulePushV2();
+    }
+  };
+
+
+Storage.prototype.removeItem =
+  function(key){
+
+    labruNativeRemoveV2.call(
+      this,
+      key
+    );
+
+
+    if(
+      this === localStorage
+      &&
+      Object
+        .values(
+          LABRU_KEYS_V2
+        )
+        .includes(key)
+      &&
+      labruCloudReadyV2
+      &&
+      !labruCloudApplyingV2
+    ){
+
+      labruCloudDirtyV2=true;
+
+      labruSchedulePushV2();
+    }
+  };
+
+
+/* =======================================================
+   PULL DESDE OTROS DISPOSITIVOS
+======================================================= */
+
+async function labruPullV2(){
+
+  if(
+    !labruCloudReadyV2
+    ||
+    labruCloudDirtyV2
+    ||
+    labruCloudApplyingV2
+    ||
+    labruCloudPollingV2
   ){
+    return;
+  }
 
-    const remoteValue =
-      remoteState[cloudKey]
-      ??
-      [];
+
+  labruCloudPollingV2=true;
+
+
+  try{
+
+    const result =
+      await labruFetchCloudV2();
+
+
+    const remoteState =
+      result.state || {};
+
+
+    const localJson =
+      JSON.stringify(
+        labruMemoryStateV2()
+      );
 
 
     const remoteJson =
       JSON.stringify(
-        remoteValue
+        remoteState
       );
-
-
-    const localJson =
-      localStorage.getItem(
-        storageKey
-      )
-      ||
-      '[]';
 
 
     if(
       localJson !== remoteJson
     ){
 
-      labruNativeSetItem.call(
-        localStorage,
-        storageKey,
-        remoteJson
+      console.log(
+        '[LaBru Cloud V2] cambios remotos detectados'
       );
 
-      changed=true;
-    }
-  }
 
-
-  labruCloudApplying=false;
-
-
-  return changed;
-}
-
-
-/* ========================================================
-   BOOTSTRAP
-
-   CASO 1:
-   Cloud vacío + Chrome con datos:
-   Chrome migra sus datos a Cloudflare.
-
-   CASO 2:
-   Cloud con datos + navegador nuevo:
-   baja datos de D1 y recarga la app.
-======================================================== */
-
-async function labruCloudBootstrap(){
-
-  try{
-
-    console.log(
-      '[LaBru Cloud] iniciando...'
-    );
-
-
-    const remoteResponse =
-      await labruGetCloudState();
-
-
-    const remoteState =
-      remoteResponse.state
-      ||
-      {};
-
-
-    const localState =
-      labruReadLocalState();
-
-
-    const remoteHasData =
-      labruHasData(
+      labruApplyStateV2(
         remoteState
       );
 
 
-    const localHasData =
-      labruHasData(
-        localState
+      labruStatusV2(
+        'Cloud · actualizado',
+        'ok'
       );
+    }
+
+
+  } catch(error){
+
+    console.error(
+      '[LaBru Cloud V2] GET',
+      error
+    );
+
+
+    labruStatusV2(
+      'Cloud · error',
+      'error'
+    );
+
+  } finally {
+
+    labruCloudPollingV2=false;
+  }
+}
+
+
+/* =======================================================
+   BOOT
+======================================================= */
+
+async function labruCloudBootV2(){
+
+  labruStatusV2(
+    'Cloud · conectando',
+    'saving'
+  );
+
+
+  try{
+
+    const forceSeed =
+      new URLSearchParams(
+        location.search
+      )
+      .get(
+        'cloudseed'
+      )
+      ===
+      '1';
 
 
     /*
-      PRIMERA MIGRACIÓN:
-      conservar los datos existentes de Chrome.
+      cloudseed=1:
+
+      EL CHROME QUE TIENE LOS DATOS SE CONVIERTE
+      EN LA FUENTE INICIAL Y SOBRESCRIBE EL SNAPSHOT
+      REMOTO UNA SOLA VEZ.
     */
 
-    if(
-      !remoteHasData
-      &&
-      localHasData
-    ){
+    if(forceSeed){
 
-      console.log(
-        '[LaBru Cloud] migrando datos locales...'
+      const localState =
+        labruMemoryStateV2();
+
+
+      const count =
+        labruStateCountV2(
+          localState
+        );
+
+
+      if(count === 0){
+
+        alert(
+          'Este navegador no tiene datos locales para migrar.\n\n'
+          +
+          'Abre este enlace desde el Chrome donde hiciste las pruebas.'
+        );
+
+
+        labruStatusV2(
+          'Cloud · sin datos locales',
+          'error'
+        );
+
+
+        return;
+      }
+
+
+      labruStatusV2(
+        'Cloud · migrando',
+        'saving'
       );
 
 
-      await labruMigrateLegacyFiles();
+      await labruMigrateFilesV2();
 
 
-      await labruPutCloudState(
-        labruReadLocalState()
-      );
+      const result =
+        await labruSaveCloudV2(
+          labruMemoryStateV2()
+        );
 
 
-      labruCloudReady=true;
+      labruCloudReadyV2=true;
+      labruCloudDirtyV2=false;
 
 
       console.log(
-        '[LaBru Cloud] migración terminada'
+        '[LaBru Cloud V2] migración inicial',
+        result.counts
+      );
+
+
+      labruStatusV2(
+        'Cloud · migrado',
+        'ok'
+      );
+
+
+      history.replaceState(
+        {},
+        '',
+        location.pathname
+      );
+
+
+      alert(
+        'Información migrada a Cloudflare correctamente.\n\n'
+        +
+        'Ya puedes abrir La Bru desde otro navegador o dispositivo.'
       );
 
 
@@ -11010,77 +11349,652 @@ async function labruCloudBootstrap(){
 
 
     /*
-      NAVEGADOR NUEVO:
-      Cloudflare es la fuente autoritativa.
+      CARGA NORMAL:
+      CLOUDFLARE TIENE PRIORIDAD.
     */
 
-    if(remoteHasData){
-
-      const changed =
-        labruApplyCloudState(
-          remoteState
-        );
+    const remote =
+      await labruFetchCloudV2();
 
 
-      if(
-        changed
-        &&
-        sessionStorage.getItem(
-          'labru_cloud_loaded'
-        )
-        !== '1'
-      ){
-
-        sessionStorage.setItem(
-          'labru_cloud_loaded',
-          '1'
-        );
+    const remoteState =
+      remote.state || {};
 
 
-        location.reload();
+    const remoteCount =
+      labruStateCountV2(
+        remoteState
+      );
 
-        return;
-      }
+
+    const localState =
+      labruMemoryStateV2();
+
+
+    const localCount =
+      labruStateCountV2(
+        localState
+      );
+
+
+    /*
+      Cloud vacío pero navegador con información:
+      permite primera migración automática.
+    */
+
+    if(
+      remoteCount === 0
+      &&
+      localCount > 0
+    ){
+
+      await labruMigrateFilesV2();
+
+
+      await labruSaveCloudV2(
+        labruMemoryStateV2()
+      );
+
+
+      labruCloudReadyV2=true;
+
+
+      labruStatusV2(
+        'Cloud · migrado',
+        'ok'
+      );
+
+
+      return;
     }
 
 
-    labruCloudReady=true;
+    /*
+      Cloud ya tiene información:
+      reemplazar memoria + localStorage del navegador.
+    */
+
+    if(remoteCount > 0){
+
+      labruApplyStateV2(
+        remoteState
+      );
+    }
+
+
+    labruCloudReadyV2=true;
+    labruCloudDirtyV2=false;
+
+
+    labruStatusV2(
+      'Cloud · actualizado',
+      'ok'
+    );
 
 
     console.log(
-      '[LaBru Cloud] listo'
+      '[LaBru Cloud V2] cargado',
+      remote.counts
     );
 
 
   } catch(error){
 
     console.error(
-      '[LaBru Cloud]',
+      '[LaBru Cloud V2] boot',
       error
     );
 
 
-    /*
-      Si Cloudflare tiene una interrupción,
-      no bloqueamos la aplicación.
-      Continúa utilizando la copia local.
-    */
-
-    labruCloudReady=true;
+    labruCloudReadyV2=false;
 
 
-    console.warn(
-      'La Bru está usando temporalmente los datos locales.'
+    labruStatusV2(
+      'Cloud · error',
+      'error'
+    );
+
+
+    alert(
+      'No fue posible conectar La Bru con Cloudflare.\n\n'
+      +
+      'No se modificaron tus datos locales.'
     );
   }
 }
 
 
-labruCloudBootstrap();
+/* =======================================================
+   AUTO REFRESH ENTRE DISPOSITIVOS
+======================================================= */
+
+labruCloudBootV2();
+
+
+setInterval(
+  labruPullV2,
+  5000
+);
 
 </script>
 
-<!-- === LABRU CLOUD SYNC V1 END === -->
+<!-- === LABRU CLOUD SYNC V2 END === -->
+
+
+<!-- === LABRU CLIENT DASHBOARD V6 START === -->
+
+<script>
+
+/*
+===========================================================
+DASHBOARD · UTILIDAD DE VENTAS
+===========================================================
+*/
+
+const v6PreviousRenderDashboard =
+  renderDashboard;
+
+
+renderDashboard = function(){
+
+  v6PreviousRenderDashboard();
+
+
+  const grid =
+    document.querySelector(
+      '#view-dashboard .metric-grid'
+    );
+
+
+  if(!grid)return;
+
+
+  if(
+    !document.getElementById(
+      'metricSalesProfit'
+    )
+  ){
+
+    grid.insertAdjacentHTML(
+      'beforeend',
+      `
+
+      <article
+        class="metric metric-highlight"
+        id="metricSalesProfitCard"
+      >
+
+        <div class="metric-label">
+          Utilidad por ventas
+        </div>
+
+        <div
+          class="metric-value"
+          id="metricSalesProfit"
+        >
+          $0.00
+        </div>
+
+        <div
+          class="metric-foot"
+          id="metricSalesProfitFoot"
+        >
+          Venta total menos costo
+        </div>
+
+      </article>
+
+      `
+    );
+  }
+
+
+  const sales =
+    typeof saleRecords !== 'undefined'
+    &&
+    Array.isArray(saleRecords)
+    ?
+    saleRecords
+    :
+    [];
+
+
+  const profit =
+    sales.reduce(
+      (total,sale) =>
+        total
+        +
+        Number(
+          sale.totalProfit || 0
+        ),
+      0
+    );
+
+
+  document.getElementById(
+    'metricSalesProfit'
+  ).textContent =
+    money(profit);
+
+
+  document.getElementById(
+    'metricSalesProfitFoot'
+  ).textContent =
+    sales.length
+    ===
+    1
+    ?
+    '1 venta registrada'
+    :
+    `${sales.length} ventas registradas`;
+};
+
+
+/*
+===========================================================
+CLIENTES · RFC CONDICIONAL
+===========================================================
+*/
+
+function v6UpdateRFCRequirement(){
+
+  const status =
+    document.getElementById(
+      'cStatus'
+    );
+
+
+  const rfc =
+    document.getElementById(
+      'cRFC'
+    );
+
+
+  if(!status || !rfc){
+    return;
+  }
+
+
+  const label =
+    rfc
+      .closest('.field')
+      ?.querySelector('label');
+
+
+  const required =
+    status.value ===
+    'Venta concretada';
+
+
+  rfc.required =
+    required;
+
+
+  if(label){
+
+    label.textContent =
+      required
+      ?
+      'RFC *'
+      :
+      'RFC';
+  }
+
+
+  rfc.placeholder =
+    required
+    ?
+    'RFC obligatorio para venta concretada'
+    :
+    'Opcional mientras sea prospecto / seguimiento';
+}
+
+
+/*
+===========================================================
+GUARDAR CLIENTE
+
+RFC solamente obligatorio cuando el status es:
+VENTA CONCRETADA.
+===========================================================
+*/
+
+saveClient = function(){
+
+  const company =
+    document.getElementById(
+      'cCompany'
+    ).value.trim();
+
+
+  const rfc =
+    (
+      document.getElementById(
+        'cRFC'
+      )?.value
+      ||
+      ''
+    )
+    .trim()
+    .toUpperCase();
+
+
+  const status =
+    document.getElementById(
+      'cStatus'
+    ).value;
+
+
+  if(!company){
+
+    alert(
+      'Captura el nombre del cliente o empresa.'
+    );
+
+    return;
+  }
+
+
+  if(
+    status ===
+    'Venta concretada'
+    &&
+    !rfc
+  ){
+
+    alert(
+      'El RFC es obligatorio cuando el estatus es Venta concretada.'
+    );
+
+    return;
+  }
+
+
+  clients.unshift({
+
+    id:
+      crypto.randomUUID(),
+
+    company,
+
+    rfc,
+
+    contact:
+      document.getElementById(
+        'cContact'
+      ).value.trim(),
+
+    phone:
+      document.getElementById(
+        'cPhone'
+      ).value.trim(),
+
+    email:
+      document.getElementById(
+        'cEmail'
+      ).value.trim(),
+
+    type:
+      document.getElementById(
+        'cType'
+      ).value,
+
+    status,
+
+    createdAt:
+      new Date().toISOString()
+  });
+
+
+  localStorage.setItem(
+    clientKey,
+    JSON.stringify(clients)
+  );
+
+
+  [
+    'cCompany',
+    'cRFC',
+    'cContact',
+    'cPhone',
+    'cEmail'
+  ]
+  .forEach(id=>{
+
+    const element =
+      document.getElementById(id);
+
+    if(element){
+      element.value='';
+    }
+  });
+
+
+  document.getElementById(
+    'cStatus'
+  ).value =
+    'Prospecto';
+
+
+  v6UpdateRFCRequirement();
+
+
+  closeClientModal();
+
+
+  renderAll();
+
+
+  setView(
+    'clients'
+  );
+};
+
+
+/*
+===========================================================
+MODAL CLIENTE
+===========================================================
+*/
+
+if(
+  typeof openClientModal ===
+  'function'
+){
+
+  const v6PreviousOpenClient =
+    openClientModal;
+
+
+  openClientModal = function(){
+
+    v6PreviousOpenClient();
+
+
+    setTimeout(()=>{
+
+      v6UpdateRFCRequirement();
+
+    },0);
+  };
+}
+
+
+/*
+===========================================================
+CAMBIO DE STATUS
+===========================================================
+*/
+
+function v6BindClientStatus(){
+
+  const status =
+    document.getElementById(
+      'cStatus'
+    );
+
+
+  if(!status)return;
+
+
+  if(
+    status.dataset.v6Bound ===
+    '1'
+  ){
+    return;
+  }
+
+
+  status.dataset.v6Bound =
+    '1';
+
+
+  status.addEventListener(
+    'change',
+    v6UpdateRFCRequirement
+  );
+
+
+  v6UpdateRFCRequirement();
+}
+
+
+/*
+===========================================================
+CATÁLOGO DE CLIENTES
+
+Mostrar claramente cuando un RFC todavía es opcional
+o está pendiente.
+===========================================================
+*/
+
+renderClients = function(){
+
+  const table =
+    document.getElementById(
+      'clientsTable'
+    );
+
+
+  if(!table)return;
+
+
+  const header =
+    table
+      .closest('table')
+      ?.querySelector(
+        'thead tr'
+      );
+
+
+  if(header){
+
+    header.innerHTML = `
+
+      <th>Empresa</th>
+      <th>RFC</th>
+      <th>Contacto</th>
+      <th>Teléfono</th>
+      <th>Tipo</th>
+      <th>Estatus</th>
+    `;
+  }
+
+
+  table.innerHTML =
+    clients.map(client=>{
+
+      const saleClosed =
+        client.status ===
+        'Venta concretada';
+
+
+      return `
+
+      <tr>
+
+        <td>
+
+          <strong>
+            ${esc(client.company)}
+          </strong>
+
+          ${
+            client.source === 'sale'
+            &&
+            client.firstSaleInvoice
+            ?
+            `<br>
+             <small>
+               Alta automática · ${esc(client.firstSaleInvoice)}
+             </small>`
+            :
+            ''
+          }
+
+        </td>
+
+
+        <td>
+
+          ${
+            client.rfc
+            ?
+            esc(client.rfc)
+            :
+            saleClosed
+            ?
+            '<span class="low-stock">RFC pendiente</span>'
+            :
+            '<span style="color:#716a5d">Opcional</span>'
+          }
+
+        </td>
+
+
+        <td>
+          ${esc(client.contact || '—')}
+        </td>
+
+
+        <td>
+          ${esc(client.phone || '—')}
+        </td>
+
+
+        <td>
+          ${esc(client.type || '—')}
+        </td>
+
+
+        <td>
+          ${esc(client.status || 'Prospecto')}
+        </td>
+
+      </tr>
+      `;
+
+    }).join('')
+    ||
+    '<tr><td colspan="6">Aún no hay clientes o prospectos.</td></tr>';
+};
+
+
+/*
+===========================================================
+INICIALIZAR
+===========================================================
+*/
+
+v6BindClientStatus();
+
+renderDashboard();
+
+renderClients();
+
+</script>
+
+<!-- === LABRU CLIENT DASHBOARD V6 END === -->
 
 </body>
 </html>
