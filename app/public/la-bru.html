@@ -11996,5 +11996,646 @@ renderClients();
 
 <!-- === LABRU CLIENT DASHBOARD V6 END === -->
 
+
+<!-- === LABRU CLIENT EDIT V7 START === -->
+
+<style>
+
+.client-edit-button{
+  min-height:32px;
+  padding:0 10px;
+  border:1px solid var(--line2);
+  border-radius:9px;
+  background:transparent;
+  color:var(--gold2);
+  font-size:10px;
+  font-weight:600;
+}
+
+.client-edit-button:hover{
+  border-color:rgba(215,170,85,.45);
+  background:#16140f;
+}
+
+</style>
+
+
+<script>
+
+let labruEditingClientId = null;
+
+
+/* ========================================================
+   ABRIR CLIENTE NUEVO / EXISTENTE
+======================================================== */
+
+openClientModal = function(clientId = null){
+
+  labruEditingClientId =
+    clientId || null;
+
+
+  const modal =
+    document.getElementById(
+      'clientModal'
+    );
+
+
+  if(!modal){
+    return;
+  }
+
+
+  const title =
+    modal.querySelector(
+      '.modal-head h2'
+    );
+
+
+  const company =
+    document.getElementById(
+      'cCompany'
+    );
+
+
+  const rfc =
+    document.getElementById(
+      'cRFC'
+    );
+
+
+  const contact =
+    document.getElementById(
+      'cContact'
+    );
+
+
+  const phone =
+    document.getElementById(
+      'cPhone'
+    );
+
+
+  const email =
+    document.getElementById(
+      'cEmail'
+    );
+
+
+  const type =
+    document.getElementById(
+      'cType'
+    );
+
+
+  const status =
+    document.getElementById(
+      'cStatus'
+    );
+
+
+  if(!clientId){
+
+    if(title){
+      title.textContent =
+        'Nuevo cliente / prospecto';
+    }
+
+
+    if(company)company.value='';
+    if(rfc)rfc.value='';
+    if(contact)contact.value='';
+    if(phone)phone.value='';
+    if(email)email.value='';
+
+
+    if(type){
+      type.value =
+        'Retail';
+    }
+
+
+    if(status){
+      status.value =
+        'Prospecto';
+    }
+
+
+  } else {
+
+    const client =
+      clients.find(
+        item =>
+          item.id === clientId
+      );
+
+
+    if(!client){
+
+      alert(
+        'No se encontró el registro.'
+      );
+
+      return;
+    }
+
+
+    if(title){
+      title.textContent =
+        'Editar cliente';
+    }
+
+
+    if(company){
+      company.value =
+        client.company || '';
+    }
+
+
+    if(rfc){
+      rfc.value =
+        client.rfc || '';
+    }
+
+
+    if(contact){
+      contact.value =
+        client.contact || '';
+    }
+
+
+    if(phone){
+      phone.value =
+        client.phone || '';
+    }
+
+
+    if(email){
+      email.value =
+        client.email || '';
+    }
+
+
+    if(
+      type
+      &&
+      client.type
+    ){
+      type.value =
+        client.type;
+    }
+
+
+    if(
+      status
+      &&
+      client.status
+    ){
+      status.value =
+        client.status;
+    }
+  }
+
+
+  if(
+    typeof v6UpdateRFCRequirement
+    ===
+    'function'
+  ){
+
+    v6UpdateRFCRequirement();
+  }
+
+
+  modal.classList.remove(
+    'hidden'
+  );
+};
+
+
+/* ========================================================
+   CERRAR
+======================================================== */
+
+closeClientModal = function(){
+
+  labruEditingClientId=null;
+
+
+  const modal =
+    document.getElementById(
+      'clientModal'
+    );
+
+
+  if(modal){
+
+    modal.classList.add(
+      'hidden'
+    );
+  }
+};
+
+
+/* ========================================================
+   GUARDAR NUEVO / EDITAR
+======================================================== */
+
+saveClient = function(){
+
+  const company =
+    document.getElementById(
+      'cCompany'
+    ).value.trim();
+
+
+  const rfc =
+    (
+      document.getElementById(
+        'cRFC'
+      )?.value
+      ||
+      ''
+    )
+    .trim()
+    .toUpperCase();
+
+
+  const contact =
+    document.getElementById(
+      'cContact'
+    ).value.trim();
+
+
+  const phone =
+    document.getElementById(
+      'cPhone'
+    ).value.trim();
+
+
+  const email =
+    document.getElementById(
+      'cEmail'
+    ).value.trim();
+
+
+  const type =
+    document.getElementById(
+      'cType'
+    ).value;
+
+
+  const status =
+    document.getElementById(
+      'cStatus'
+    ).value;
+
+
+  if(!company){
+
+    alert(
+      'Captura el nombre del cliente o empresa.'
+    );
+
+    return;
+  }
+
+
+  if(
+    status ===
+    'Venta concretada'
+    &&
+    !rfc
+  ){
+
+    alert(
+      'El RFC es obligatorio cuando el estatus es Venta concretada.'
+    );
+
+    return;
+  }
+
+
+  /*
+    Validar RFC duplicado sólo cuando existe.
+  */
+
+  if(rfc){
+
+    const duplicated =
+      clients.find(
+        client =>
+          client.id !==
+          labruEditingClientId
+          &&
+          String(
+            client.rfc || ''
+          )
+          .trim()
+          .toUpperCase()
+          ===
+          rfc
+      );
+
+
+    if(duplicated){
+
+      alert(
+        'Ya existe otro cliente con ese RFC.'
+      );
+
+      return;
+    }
+  }
+
+
+  if(labruEditingClientId){
+
+    const index =
+      clients.findIndex(
+        item =>
+          item.id ===
+          labruEditingClientId
+      );
+
+
+    if(index === -1){
+
+      alert(
+        'No se encontró el cliente que intentas editar.'
+      );
+
+      return;
+    }
+
+
+    /*
+      Mantener metadata histórica.
+    */
+
+    clients[index] = {
+
+      ...clients[index],
+
+      company,
+
+      rfc,
+
+      contact,
+
+      phone,
+
+      email,
+
+      type,
+
+      status,
+
+      updatedAt:
+        new Date()
+        .toISOString()
+    };
+
+
+  } else {
+
+    clients.unshift({
+
+      id:
+        crypto.randomUUID(),
+
+      company,
+
+      rfc,
+
+      contact,
+
+      phone,
+
+      email,
+
+      type,
+
+      status,
+
+      createdAt:
+        new Date()
+        .toISOString(),
+
+      updatedAt:
+        new Date()
+        .toISOString()
+    });
+  }
+
+
+  localStorage.setItem(
+    clientKey,
+    JSON.stringify(clients)
+  );
+
+
+  labruEditingClientId=null;
+
+
+  closeClientModal();
+
+
+  renderAll();
+
+
+  setView(
+    'clients'
+  );
+};
+
+
+/* ========================================================
+   CATÁLOGO DE CLIENTES CON BOTÓN EDITAR
+======================================================== */
+
+renderClients = function(){
+
+  const table =
+    document.getElementById(
+      'clientsTable'
+    );
+
+
+  if(!table){
+    return;
+  }
+
+
+  const header =
+    table
+      .closest('table')
+      ?.querySelector(
+        'thead tr'
+      );
+
+
+  if(header){
+
+    header.innerHTML = `
+
+      <th>Empresa</th>
+      <th>RFC</th>
+      <th>Contacto</th>
+      <th>Teléfono</th>
+      <th>Tipo</th>
+      <th>Estatus</th>
+      <th></th>
+    `;
+  }
+
+
+  table.innerHTML =
+    clients.map(client=>{
+
+      const closed =
+        client.status ===
+        'Venta concretada';
+
+
+      return `
+
+      <tr>
+
+        <td>
+
+          <strong>
+            ${esc(
+              client.company || ''
+            )}
+          </strong>
+
+
+          ${
+            client.firstSaleInvoice
+            ?
+            `<br>
+             <small>
+               Venta ${esc(
+                 client.firstSaleInvoice
+               )}
+             </small>`
+            :
+            ''
+          }
+
+        </td>
+
+
+        <td>
+
+          ${
+            client.rfc
+            ?
+            esc(client.rfc)
+            :
+            closed
+            ?
+            '<span class="low-stock">RFC pendiente</span>'
+            :
+            '<span style="color:#716a5d">Opcional</span>'
+          }
+
+        </td>
+
+
+        <td>
+          ${esc(
+            client.contact || '—'
+          )}
+        </td>
+
+
+        <td>
+          ${esc(
+            client.phone || '—'
+          )}
+        </td>
+
+
+        <td>
+          ${esc(
+            client.type || '—'
+          )}
+        </td>
+
+
+        <td>
+          ${esc(
+            client.status || 'Prospecto'
+          )}
+        </td>
+
+
+        <td>
+
+          <button
+            type="button"
+            class="client-edit-button"
+            onclick="
+              openClientModal(
+                '${client.id}'
+              )
+            "
+          >
+            Editar
+          </button>
+
+        </td>
+
+      </tr>
+      `;
+
+    }).join('')
+    ||
+    '<tr><td colspan="7">Aún no hay clientes o prospectos.</td></tr>';
+};
+
+
+/* ========================================================
+   RFC DINÁMICO
+======================================================== */
+
+const clientStatus =
+  document.getElementById(
+    'cStatus'
+  );
+
+
+if(clientStatus){
+
+  clientStatus.addEventListener(
+    'change',
+    ()=>{
+
+      if(
+        typeof v6UpdateRFCRequirement
+        ===
+        'function'
+      ){
+
+        v6UpdateRFCRequirement();
+      }
+
+    }
+  );
+}
+
+
+/* ========================================================
+   RENDER
+======================================================== */
+
+renderClients();
+
+</script>
+
+<!-- === LABRU CLIENT EDIT V7 END === -->
+
 </body>
 </html>
